@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "examples/dist",
+    "rootDir": ".",
+    "noEmit": false
+  },
+  "include": ["examples/sky-http-hello/index.ts", "src/**/*.ts"]
+}

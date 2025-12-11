@@ -3,6 +3,7 @@ import { App } from "../src/core/app";
 import { Handler, SkyContext } from "../src/core/context";
 import { SkyPlugin } from "../src/core/plugin";
 import { SkyRequest } from "../src/core/http";
+import { httpOk } from "../src/core/http/responses";
 
 const baseContext: SkyContext = {
   requestId: "req-1",
@@ -40,12 +41,18 @@ describe("App", () => {
 
   it("returns 404 when route does not exist", async () => {
     const app = new App();
-    const response = await app.handle(buildRequest("GET", "/missing"), baseContext);
+    const response = await app.handle(
+      buildRequest("GET", "/missing"),
+      baseContext,
+    );
 
     expect(response.statusCode).toBe(404);
     expect(response.body).toMatchObject({
       message: "Route not found",
-      path: "/missing",
+      details: {
+        path: "/missing",
+        method: "GET",
+      },
     });
   });
 
@@ -61,7 +68,7 @@ describe("App", () => {
     };
 
     const app = new App({ plugins: [plugin] });
-    app.getRouter().register("GET", "/hello", noopHandler);
+    app.get("/hello", noopHandler);
 
     const response = await app.handle(buildRequest("GET", "/hello"), baseContext);
 
@@ -135,7 +142,8 @@ describe("App", () => {
     };
 
     const app = new App({ plugins: [pluginA, pluginB] });
-    app.getRouter().register("GET", "/order", noopHandler);
+
+    app.get("/order", noopHandler);
 
     await app.handle(buildRequest("GET", "/order"), baseContext);
 
@@ -157,7 +165,7 @@ describe("App", () => {
     };
 
     const app = new App({ plugins: [plugin] });
-    app.getRouter().register("GET", "/secure", noopHandler);
+    app.get("/secure", noopHandler);
 
     const response = await app.handle(buildRequest("GET", "/secure"), baseContext);
 
@@ -172,7 +180,11 @@ describe("App", () => {
 
     const result = app.registerRoute("POST", "/registered", handler);
 
-    expect(result).toEqual({ method: "POST", path: "/registered" });
+    expect(result).toEqual({
+      method: "POST",
+      path: "/registered",
+      pathPattern: "/registered",
+    });
 
     const response = await app.handle(
       buildRequest("POST", "/registered"),
@@ -181,5 +193,130 @@ describe("App", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(response.statusCode).toBe(202);
+  });
+
+  it("provides HTTP DSL helpers", async () => {
+    const app = new App();
+    app.post("/dsl/:id", (request) =>
+      httpOk({ id: request.params?.id, method: request.method }),
+    );
+
+    const response = await app.handle(
+      buildRequest("POST", "/dsl/55"),
+      baseContext,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ id: "55", method: "POST" });
+  });
+
+  it("supports all HTTP verb helpers (put/patch/delete/options/head)", async () => {
+    const app = new App();
+    app.put("/dsl-put", () => httpOk("put"));
+    app.patch("/dsl-patch", () => httpOk("patch"));
+    app.delete("/dsl-delete", () => httpOk("delete"));
+    app.options("/dsl-options", () => httpOk("options"));
+    app.head("/dsl-head", () => ({ statusCode: 204 }));
+
+    const responses = await Promise.all([
+      app.handle(buildRequest("PUT", "/dsl-put"), baseContext),
+      app.handle(buildRequest("PATCH", "/dsl-patch"), baseContext),
+      app.handle(buildRequest("DELETE", "/dsl-delete"), baseContext),
+      app.handle(buildRequest("OPTIONS", "/dsl-options"), baseContext),
+      app.handle(buildRequest("HEAD", "/dsl-head"), baseContext),
+    ]);
+
+    expect(responses[0].body).toBe("put");
+    expect(responses[1].body).toBe("patch");
+    expect(responses[2].body).toBe("delete");
+    expect(responses[3].body).toBe("options");
+    expect(responses[4].statusCode).toBe(204);
+  });
+
+  it("normalizes handler return values and enriches context", async () => {
+    const context: SkyContext = { ...baseContext };
+    const app = new App();
+    app.get("/info", () => ({ info: true }));
+
+    const response = await app.handle(buildRequest("GET", "/info"), context);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ info: true });
+    expect(context.routePattern).toBe("/info");
+    expect(context.httpMethod).toBe("GET");
+    expect(context.httpPath).toBe("/info");
+    expect(context.requestStartedAt).toBeDefined();
+    expect(context.requestEndedAt).toBeDefined();
+  });
+
+  it("exposes error details in development environment", async () => {
+    const app = new App({ environment: "development" });
+    app.get("/crash", () => {
+      throw new Error("dev boom");
+    });
+
+    const response = await app.handle(buildRequest("GET", "/crash"), baseContext);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({
+      message: "Internal Server Error",
+      details: expect.objectContaining({ message: "dev boom" }),
+    });
+  });
+
+  it("does not expose error details when ambiente é production", async () => {
+    const app = new App({ environment: "production" });
+    app.get("/prod-crash", () => {
+      throw new Error("hidden");
+    });
+
+    const response = await app.handle(
+      buildRequest("GET", "/prod-crash"),
+      baseContext,
+    );
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({ message: "Internal Server Error" });
+    expect(response.body?.details).toBeUndefined();
+  });
+
+  it("usa ambiente production por padrão quando NODE_ENV está indefinido", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    const app = new App();
+    app.get("/default-env", () => {
+      throw new Error("hidden");
+    });
+
+    try {
+      const response = await app.handle(
+        buildRequest("GET", "/default-env"),
+        baseContext,
+      );
+      expect(response.body?.details).toBeUndefined();
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+
+  it("serializes unknown error types com detalhe genérico", async () => {
+    const app = new App({ environment: "development" });
+    app.get("/weird-error", () => {
+      throw "boom";
+    });
+
+    const response = await app.handle(
+      buildRequest("GET", "/weird-error"),
+      baseContext,
+    );
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({
+      details: { detail: "boom" },
+    });
   });
 });

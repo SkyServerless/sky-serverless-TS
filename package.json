@@ -1,15 +1,18 @@
 {
   "name": "sky-serverless-ts",
   "version": "0.1.0",
-  "type": "module",
   "scripts": {
+    "dev": "ts-node --project tsconfig.json examples/sky-http-hello/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "example:hello": "npm run dev",
+    "example:hello:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/sky-http-hello/index.js"
   },
   "devDependencies": {
-    "@types/node": "^20.11.30",
+    "@types/node": "^20.19.26",
     "@vitest/coverage-v8": "^4.0.15",
+    "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
     "vitest": "^4.0.15"
   }

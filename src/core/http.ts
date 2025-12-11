@@ -29,6 +29,7 @@ export interface SkyRequest<
   params?: Record<string, string>;
   user?: unknown;
   requestId?: string;
+  raw?: unknown;
 }
 
 /**
@@ -38,4 +39,20 @@ export interface SkyResponse<TBody = unknown> {
   statusCode: number;
   headers?: SkyHeaders;
   body?: TBody;
+}
+
+export const SKY_HTTP_METHODS: readonly SkyHttpMethod[] = [
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+  "TRACE",
+  "CONNECT",
+] as const;
+
+export function isSkyHttpMethod(value: string): value is SkyHttpMethod {
+  return SKY_HTTP_METHODS.includes(value as SkyHttpMethod);
 }

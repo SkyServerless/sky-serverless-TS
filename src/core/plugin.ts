@@ -21,3 +21,11 @@ export interface SkyPlugin {
   onError?(error: unknown, context: SkyContext): void | Promise<void>;
   extendOpenApi?(document: OpenApiDocument): void | Promise<void>;
 }
+
+export const SKY_PLUGIN_HOOKS = [
+  "setup",
+  "onRequest",
+  "onResponse",
+  "onError",
+  "extendOpenApi",
+] as const;

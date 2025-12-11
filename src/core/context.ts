@@ -1,4 +1,4 @@
-import { SkyRequest, SkyResponse } from "./http";
+import { SkyHttpMethod, SkyRequest, SkyResponse } from "./http";
 
 export type SkyServicesRegistry = Record<string, unknown>;
 
@@ -10,7 +10,14 @@ export interface SkyContext<
   provider: string;
   services: TServices;
   meta?: TMeta;
+  httpMethod?: SkyHttpMethod | string;
+  httpPath?: string;
+  routePattern?: string;
+  requestStartedAt?: number;
+  requestEndedAt?: number;
 }
+
+export const SKY_CONTEXT_SYMBOL = Symbol.for("sky.context");
 
 /**
  * Handlers process requests with access to the context assembled by adapters/plugins.

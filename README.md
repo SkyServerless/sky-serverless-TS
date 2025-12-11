@@ -1,1 +1,1 @@
-# sky-serverless-TS
+# SkyServerless-TS
