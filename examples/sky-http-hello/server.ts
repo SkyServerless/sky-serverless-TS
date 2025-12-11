@@ -5,7 +5,7 @@ const app = new App({ environment: "development" });
 
 const helloHandler: Handler = (request) => {
   const name = request.params?.name ?? "world";
-  return httpOk({ message: `Hello, ${name}!`, query: request.query });
+  return httpOk({ provider: "node", message: `Hello, ${name}!`, query: request.query });
 };
 
 app.get("/hello/:name", helloHandler);

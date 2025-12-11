@@ -26,6 +26,7 @@ export interface SkyRequest<
   headers: SkyHeaders;
   query?: TQuery;
   body?: TBody;
+  rawBody?: Buffer | Uint8Array | string;
   params?: Record<string, string>;
   user?: unknown;
   requestId?: string;

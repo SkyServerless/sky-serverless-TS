@@ -2,12 +2,16 @@
   "name": "sky-serverless-ts",
   "version": "0.1.0",
   "scripts": {
-    "dev": "ts-node --project tsconfig.json examples/sky-http-hello/index.ts",
+    "dev": "ts-node --project tsconfig.json examples/sky-http-hello/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "example:hello": "npm run dev",
-    "example:hello:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/sky-http-hello/index.js"
+    "example:hello:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/sky-http-hello/server.js",
+    "example:openshift": "ts-node --project tsconfig.json examples/openshift/server.ts",
+    "example:openshift:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/openshift/server.js",
+    "example:gcp": "ts-node --project tsconfig.json examples/gcp/server.ts",
+    "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js"
   },
   "devDependencies": {
     "@types/node": "^20.19.26",

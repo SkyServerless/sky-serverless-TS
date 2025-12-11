@@ -107,6 +107,20 @@ describe("HTTP parsers", () => {
     );
   });
 
+  it("parses x-www-form-urlencoded payloads", () => {
+    const bufferForm = parseBody(
+      Buffer.from("name=Sky&tags=a&tags=b"),
+      "application/x-www-form-urlencoded",
+    );
+    expect(bufferForm.body).toEqual({ name: "Sky", tags: ["a", "b"] });
+
+    const stringForm = parseBody(
+      "count=10",
+      "application/x-www-form-urlencoded",
+    );
+    expect(stringForm.body).toEqual({ count: "10" });
+  });
+
   it("retorna body undefined quando payload é vazio", () => {
     const result = parseBody(undefined, "application/json");
     expect(result.body).toBeUndefined();

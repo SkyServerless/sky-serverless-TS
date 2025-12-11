@@ -277,7 +277,8 @@ describe("App", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.body).toMatchObject({ message: "Internal Server Error" });
-    expect(response.body?.details).toBeUndefined();
+    const prodBody = response.body as { details?: unknown } | undefined;
+    expect(prodBody?.details).toBeUndefined();
   });
 
   it("usa ambiente production por padrão quando NODE_ENV está indefinido", async () => {
@@ -293,7 +294,8 @@ describe("App", () => {
         buildRequest("GET", "/default-env"),
         baseContext,
       );
-      expect(response.body?.details).toBeUndefined();
+      const defaultBody = response.body as { details?: unknown } | undefined;
+      expect(defaultBody?.details).toBeUndefined();
     } finally {
       if (originalNodeEnv === undefined) {
         delete process.env.NODE_ENV;

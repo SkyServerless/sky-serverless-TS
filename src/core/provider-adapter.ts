@@ -3,12 +3,15 @@ import { SkyContext } from "./context";
 import { SkyRequest, SkyResponse } from "./http";
 import { httpError } from "./http/responses";
 
-export interface HttpProviderAdapter<
+/**
+ * Generic contract used by providers to translate native HTTP events into Sky requests/responses.
+ */
+export interface ProviderAdapter<
   TRawRequest = unknown,
   TRawResponse = unknown,
   TContext extends SkyContext = SkyContext,
 > {
-  providerName: string;
+  readonly providerName: "openshift" | "gcp" | string;
   toSkyRequest(rawRequest: TRawRequest): Promise<SkyRequest> | SkyRequest;
   fromSkyResponse(
     response: SkyResponse,
@@ -21,12 +24,18 @@ export interface HttpProviderAdapter<
   ): Promise<TContext> | TContext;
 }
 
+export type HttpProviderAdapter<
+  TRawRequest = unknown,
+  TRawResponse = unknown,
+  TContext extends SkyContext = SkyContext,
+> = ProviderAdapter<TRawRequest, TRawResponse, TContext>;
+
 export function createHttpHandler<
   TRawRequest,
   TRawResponse,
   TContext extends SkyContext = SkyContext,
 >(
-  adapter: HttpProviderAdapter<TRawRequest, TRawResponse, TContext>,
+  adapter: ProviderAdapter<TRawRequest, TRawResponse, TContext>,
   app: App,
 ) {
   return async (rawRequest: TRawRequest, rawResponse: TRawResponse) => {
@@ -49,7 +58,7 @@ async function resolveContext<
   TRawResponse,
   TContext extends SkyContext,
 >(
-  adapter: HttpProviderAdapter<TRawRequest, TRawResponse, TContext>,
+  adapter: ProviderAdapter<TRawRequest, TRawResponse, TContext>,
   rawRequest: TRawRequest,
   rawResponse: TRawResponse,
   skyRequest: SkyRequest,
@@ -72,7 +81,7 @@ async function resolveContext<
   } as TContext;
 }
 
-function generateRequestId(): string {
+export function generateRequestId(): string {
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 

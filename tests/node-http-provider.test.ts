@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { Socket } from "node:net";
 import { Readable } from "node:stream";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { App } from "../src/core/app";
@@ -31,7 +32,7 @@ function createMockRequest(bodyChunks: Array<string | Buffer>) {
   };
   request.method = "POST";
   request.url = "/hello/world?tag=a&tag=b";
-  request.socket = { remoteAddress: "127.0.0.1" } as unknown as http.Socket;
+  request.socket = { remoteAddress: "127.0.0.1" } as unknown as Socket;
 
   return request;
 }
@@ -153,6 +154,9 @@ describe("Node HTTP adapter", () => {
     delete request.headers["x-request-id"];
     const rawResponse = createMockResponse();
 
+    if (!adapter.createContext) {
+      throw new Error("Adapter did not expose createContext");
+    }
     const context = await adapter.createContext(request, rawResponse);
 
     expect(context.provider).toBe("dev-node");
@@ -168,6 +172,9 @@ describe("Node HTTP adapter", () => {
       }),
     });
     const request = createMockRequest([]);
+    if (!adapter.createContext) {
+      throw new Error("Adapter did not expose createContext");
+    }
     const context = await adapter.createContext(request, createMockResponse());
     expect(context.meta?.ip).toBe("10.0.0.1");
   });
@@ -175,6 +182,9 @@ describe("Node HTTP adapter", () => {
   it("usa requestId do header ou do extendContext quando disponível", async () => {
     const headerAdapter = createNodeHttpAdapter();
     const requestWithHeader = createMockRequest([]);
+    if (!headerAdapter.createContext) {
+      throw new Error("Adapter did not expose createContext");
+    }
     const headerContext = await headerAdapter.createContext(
       requestWithHeader,
       createMockResponse(),
@@ -186,6 +196,9 @@ describe("Node HTTP adapter", () => {
     });
     const requestWithoutHeader = createMockRequest([]);
     delete requestWithoutHeader.headers["x-request-id"];
+    if (!adapterWithId.createContext) {
+      throw new Error("Adapter did not expose createContext");
+    }
     const extendedContext = await adapterWithId.createContext(
       requestWithoutHeader,
       createMockResponse(),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/core/app";
 import { SkyContext } from "../src/core/context";
-import { HttpProviderAdapter, createHttpHandler } from "../src/core/provider-adapter";
+import { ProviderAdapter, createHttpHandler } from "../src/core/provider-adapter";
 import { httpOk } from "../src/core/http/responses";
 
 describe("HttpProviderAdapter integration", () => {
@@ -21,7 +21,7 @@ describe("HttpProviderAdapter integration", () => {
       headers?: Record<string, string>;
     }
 
-    const adapter: HttpProviderAdapter<RawRequest, RawResponse> = {
+    const adapter: ProviderAdapter<RawRequest, RawResponse> = {
       providerName: "test-provider",
       toSkyRequest(rawRequest) {
         return {
@@ -61,7 +61,7 @@ describe("HttpProviderAdapter integration", () => {
     const app = new App();
     app.get("/ping", () => httpOk("pong"));
 
-    const adapter: HttpProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
+    const adapter: ProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
       providerName: "minimal",
       toSkyRequest: (rawReq) => ({ method: rawReq.method, path: rawReq.path, headers: {} }),
       fromSkyResponse: (response, _rawRequest, rawResponse) => {
@@ -82,7 +82,7 @@ describe("HttpProviderAdapter integration", () => {
     app.get("/ctx", () => httpOk("ctx"));
 
     const contexts: SkyContext[] = [];
-    const adapter: HttpProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
+    const adapter: ProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
       providerName: "partial",
       toSkyRequest: (rawReq) => ({ method: rawReq.method, path: rawReq.path, headers: {} }),
       fromSkyResponse: (response, _rawRequest, rawResponse) => {
@@ -110,7 +110,7 @@ describe("HttpProviderAdapter integration", () => {
   it("retorna erro padrão quando o adapter falha com Error", async () => {
     const app = new App();
     const fromSkyResponse = vi.fn();
-    const adapter: HttpProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
+    const adapter: ProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
       {
         providerName: "fails",
         toSkyRequest: () => {
@@ -131,7 +131,7 @@ describe("HttpProviderAdapter integration", () => {
   it("serializa detalhes genéricos quando adapter lança valor não-Error", async () => {
     const app = new App();
     const fromSkyResponse = vi.fn();
-    const adapter: HttpProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
+    const adapter: ProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
       {
         providerName: "fails",
         toSkyRequest: () => {

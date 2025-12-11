@@ -7,7 +7,7 @@ import {
   SkyContext,
   httpOk,
   parseBody,
-  HttpProviderAdapter,
+  ProviderAdapter,
   createHttpHandler,
   SKY_HTTP_METHODS,
   isSkyHttpMethod,
@@ -54,7 +54,7 @@ describe("Pacote principal", () => {
     const app = new App();
     app.get("/entry", () => httpOk("ok"));
 
-    const adapter: HttpProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
+    const adapter: ProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
       providerName: "entry",
       toSkyRequest: (raw) => ({ method: raw.method, path: raw.path, headers: {} }),
       fromSkyResponse: (response, _rawReq, rawRes) => {

@@ -83,6 +83,17 @@ export function parseBody(
     }
   }
 
+  if (normalizedType === "application/x-www-form-urlencoded") {
+    const decoded =
+      typeof rawBody === "string"
+        ? rawBody
+        : Buffer.from(rawBody).toString("utf-8");
+    return {
+      body: parseQueryString(decoded),
+      contentType: normalizedType,
+    };
+  }
+
   if (normalizedType.startsWith("text/")) {
     return {
       body:

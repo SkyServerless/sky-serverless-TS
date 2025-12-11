@@ -1,8 +1,13 @@
 import http from "node:http";
 import { App } from "../core/app";
 import { SkyContext } from "../core/context";
-import { HttpProviderAdapter, createHttpHandler } from "../core/provider-adapter";
+import {
+  ProviderAdapter,
+  createHttpHandler,
+  generateRequestId,
+} from "../core/provider-adapter";
 import { normalizeHeaders, parseBody, parseQueryString } from "../core/http/parsers";
+import { readIncomingMessage } from "./request-utils";
 
 export interface NodeHttpAdapterOptions {
   providerName?: string;
@@ -20,7 +25,7 @@ export interface NodeHttpServerOptions extends NodeHttpAdapterOptions {
 
 export function createNodeHttpAdapter(
   options: NodeHttpAdapterOptions = {},
-): HttpProviderAdapter<http.IncomingMessage, http.ServerResponse> {
+): ProviderAdapter<http.IncomingMessage, http.ServerResponse> {
   const providerName = options.providerName ?? "local-node";
   return {
     providerName,
@@ -29,7 +34,7 @@ export function createNodeHttpAdapter(
         rawRequest.url ?? "/",
         `http://${rawRequest.headers.host ?? "localhost"}`,
       );
-      const bodyBuffer = await readRequestBody(rawRequest);
+      const bodyBuffer = await readIncomingMessage(rawRequest);
       const parsedBody = parseBody(
         bodyBuffer.length ? bodyBuffer : undefined,
         rawRequest.headers["content-type"],
@@ -96,16 +101,6 @@ export function startNodeHttpServer(
   return server;
 }
 
-async function readRequestBody(
-  rawRequest: http.IncomingMessage,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of rawRequest) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
-}
-
 function serializeBody(
   body: unknown,
 ): string | Buffer | Uint8Array | undefined {
@@ -126,8 +121,4 @@ function serializeBody(
   }
 
   return JSON.stringify(body);
-}
-
-function generateRequestId(): string {
-  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
