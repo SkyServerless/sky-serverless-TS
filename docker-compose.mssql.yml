@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sky_mssql
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "SkyStrongPwd123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/mssql-tools18/bin/sqlcmd",
+          "-C",
+          "-S",
+          "localhost",
+          "-U",
+          "sa",
+          "-P",
+          "SkyStrongPwd123!",
+          "-Q",
+          "SELECT 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - mssql_data:/var/opt/mssql
+
+volumes:
+  mssql_data:

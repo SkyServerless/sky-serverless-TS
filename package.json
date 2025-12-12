@@ -5,7 +5,9 @@
     "dev": "ts-node --project tsconfig.json examples/sky-http-hello/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "coverage:base": "vitest run --coverage",
+    "coverage:plugins": "vitest run --coverage --coverage.include \"src/plugins/data/**\" --coverage.thresholds.perFile --coverage.thresholds.lines 100 --coverage.thresholds.branches 100 --coverage.thresholds.functions 100 --coverage.thresholds.statements 100",
+    "test:coverage": "npm run coverage:base && npm run coverage:plugins",
     "example:hello": "npm run dev",
     "example:hello:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/sky-http-hello/server.js",
     "example:openshift": "ts-node --project tsconfig.json examples/openshift/server.ts",
@@ -19,5 +21,10 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
     "vitest": "^4.0.15"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.4.1",
+    "mssql": "^12.2.0",
+    "mysql2": "^3.11.3"
   }
 }
