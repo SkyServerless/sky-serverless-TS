@@ -9,7 +9,8 @@ SkyServerless-TS is a TypeScript-first toolkit for building portable HTTP worklo
 3. [Getting Started](#getting-started)
 4. [Usage Example](#usage-example)
 5. [Data Plugins](#data-plugins)
-6. [Testing & Quality](#testing--quality)
+6. [Docs & Auth Plugins](#docs--auth-plugins)
+7. [Testing & Quality](#testing--quality)
 
 ## Features
 
@@ -121,6 +122,226 @@ Each plugin lives in `src/plugins/data` and is exported via `src/plugins/data/in
   - Custom `serializer`/`deserializer` implementations
 - `wrap(key, ttl, fetcher)` reads from cache, calls `fetcher` on misses, persists non-`undefined` values, and returns the fresh payload.
 
+## Docs & Auth Plugins
+
+The documentation/authentication backlog (`backlog/05-plugins-doc-auth.yaml`) defines the acceptance criteria for both plugins that now ship with the toolkit:
+
+1. **DOC-1 – `@sky/swagger`**: automatically mirror every registered route into an OpenAPI document plus a Swagger UI served by the framework.
+2. **AUTH-1 – `@sky/auth-jwt`**: middleware-only authentication helpers that validate JWTs (headers or cookies) and expose helpers so apps can implement their own auth flows.
+
+### `@sky/swagger`
+
+- Mirrors router metadata into an OpenAPI 3.1 document available at `/docs.json` and serves Swagger UI at `/docs`. Override `jsonPath`, `uiPath`, `uiTitle`, or the OpenAPI version (`openapi`) if you want custom endpoints or branding.
+- Route metadata accepts `summary`, `description`, `tags`, `responses` (plain strings or `{ description, content, headers }` objects), `requestBody` definitions (`description`, `required`, `content`) for payloads, and `parameters` arrays (query, header, path, cookie) so the Swagger UI can render both body and input controls.
+- `requestBody` follows the OpenAPI structure:
+  - `description`: short explanation of the payload.
+  - `required`: boolean flag to enforce input before enabling “Try it out”.
+  - `content`: keyed by media type; each entry can specify `schema`, `example`, and `examples` to render JSON editors or form-data inputs.
+- `parameters` are arrays with `{ name, in, description, required, schema, example }` entries. `in` accepts `query`, `header`, `path`, and `cookie`, mirroring the OpenAPI spec so Swagger UI renders text boxes, selects, or checkboxes automatically.
+- Configuration:
+  - `info`, `servers`, `tags`, and `components` (incluindo `securitySchemes`) to enrich the document.
+  - `security` (requirements matrix) to apply global authentication to Swagger UI routes.
+  - `includeDocsEndpoints` to optionally expose the `/docs`/`/docs.json` routes inside the document (disabled by default to keep docs internals hidden).
+
+```ts
+import { swaggerPlugin } from "./src/plugins/doc";
+import { httpOk } from "./src/core/http/responses";
+
+const app = new App({
+  plugins: [
+    swaggerPlugin({
+      info: { title: "Billing API", version: "1.2.3" },
+      servers: [{ url: "https://api.example.com" }],
+      jsonPath: "/swagger.json",
+      uiPath: "/swagger",
+    }),
+  ],
+});
+
+app.get(
+  "/invoices/:id",
+  () => httpOk({ ok: true }),
+  {
+    summary: "Invoice detail",
+    tags: ["billing"],
+    parameters: [
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string" },
+      },
+      {
+        name: "includeLines",
+        in: "query",
+        description: "Expand invoice with line items.",
+        schema: { type: "boolean" },
+      },
+      {
+        name: "x-correlation-id",
+        in: "header",
+        description: "Trace identifier for observability.",
+        schema: { type: "string" },
+      },
+    ],
+    responses: {
+      200: { description: "Invoice payload" },
+      404: "Invoice not found",
+    },
+  },
+);
+
+app.post(
+  "/invoices",
+  () => httpOk({ created: true }),
+  {
+    summary: "Create invoice",
+    tags: ["billing"],
+    parameters: [
+      {
+        name: "x-request-id",
+        in: "header",
+        description: "Optional idempotency key.",
+        schema: { type: "string" },
+      },
+    ],
+    requestBody: {
+      description: "Invoice payload",
+      required: true,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: {
+              customerId: { type: "string" },
+              amount: { type: "number" },
+            },
+            required: ["customerId", "amount"],
+          },
+          examples: {
+            sample: {
+              value: { customerId: "cust-1", amount: 120.5 },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Invoice created" },
+    },
+  },
+);
+```
+
+### `@sky/auth-jwt`
+
+- Pure middleware: validates JWT access tokens on every request (Authorization header by default, optional cookie) and injects the resolved user into `ctx.services.user` and `request.user`.
+- Offers helper utilities (via `ctx.services.auth`) so you can implement your own login/refresh/logout flows without the framework touching your database. Helpers include `signAccessToken`, `signRefreshToken`, `issueTokens`, and `verifyToken`.
+- Configuration:
+  - `jwtSecret` (or fallback env `SKY_AUTH_JWT_SECRET` defined in AUTH-1.1), `accessTokenTtlSeconds`, `refreshTokenTtlSeconds`.
+  - `algorithm` (default `HS256`). Set to `RS256` e fornecer `privateKey`/`publicKey` (ou variáveis `SKY_AUTH_JWT_PRIVATE_KEY`/`SKY_AUTH_JWT_PUBLIC_KEY`) para usar chaves assimétricas.
+  - `cookieName`: nome do cookie cuja leitura deve ser tentada quando não houver header `Authorization`.
+  - `userServiceKey`/`authServiceKey`: mudam os registries (`ctx.services.user` e `.auth`) caso você queira isolar contextos.
+  - `tokenResolver(request, context)`: estratégia personalizada para extrair tokens (útil para cabeçalhos proprietários, WebSockets, etc.).
+  - `resolveUser(payload, context)`: reidrata seu usuário (buscando no banco, cache, etc.) antes de expô-lo ao handler; retorne `null` para bloquear o request.
+
+```ts
+import { httpError, httpOk } from "./src/core/http/responses";
+import { authPlugin, AuthHelpers, AuthUser } from "./src/plugins/auth";
+
+const app = new App({
+  plugins: [
+    authPlugin({
+      config: {
+        jwtSecret: process.env.SKY_AUTH_JWT_SECRET!,
+        cookieName: "myapp.auth",
+        accessTokenTtlSeconds: 30 * 60,
+        refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
+      },
+      async resolveUser(payload) {
+        // Optionally fetch extra fields from your database.
+        return userRepo.findById(payload.sub) as Promise<AuthUser | null>;
+      },
+    }),
+  ],
+});
+
+app.post("/login", async (req, ctx) => {
+  const user = await userRepo.verify(req.body.email, req.body.password);
+  if (!user) {
+    return httpError({ statusCode: 401, message: "Invalid credentials" });
+  }
+  const auth = ctx.services.auth as AuthHelpers;
+  const tokens = auth.issueTokens({ id: user.id, email: user.email });
+  return httpOk(tokens);
+}, {
+  summary: "Authenticate user",
+  tags: ["auth"],
+  requestBody: {
+    description: "Credentials payload",
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email" },
+            password: { type: "string" },
+          },
+          required: ["email", "password"],
+        },
+        examples: {
+          demo: {
+            value: { email: "ada@example.com", password: "pass-ada" },
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "JWT pair" },
+    401: "Invalid credentials",
+  },
+});
+
+app.get("/profile", (_req, ctx) => {
+  const user = ctx.services.user as AuthUser | undefined;
+  if (!user) {
+    return httpError({ statusCode: 401, message: "Unauthorized" });
+  }
+  return httpOk({ user });
+}, {
+  summary: "Current profile",
+  tags: ["auth"],
+  parameters: [
+    {
+      name: "Authorization",
+      in: "header",
+      description: "Bearer access token",
+      required: true,
+      schema: { type: "string" },
+    },
+  ],
+  responses: {
+    200: { description: "User payload" },
+    401: "Missing/invalid token",
+  },
+});
+
+// Configure RS256 (public/private key pair) instead of shared secrets:
+const rsaApp = new App({
+  plugins: [
+    authPlugin({
+      config: {
+        algorithm: "RS256",
+        privateKey: process.env.SKY_AUTH_JWT_PRIVATE_KEY!,
+        publicKey: process.env.SKY_AUTH_JWT_PUBLIC_KEY,
+      },
+    }),
+  ],
+});
+```
+
 ## Testing & Quality
 
 - Run the entire suite:
@@ -142,3 +363,4 @@ Each plugin lives in `src/plugins/data` and is exported via `src/plugins/data/in
   ```
 
 Targeted coverage profiles live in `package.json` (`coverage:plugins` enforces 100% on `src/plugins/data/**`). Continuous integration should run `npm test` and `npm exec tsc -- --noEmit` at a minimum.
+  - `components.securitySchemes` lets you define auth flows for the UI. The demo registers a `bearerAuth` scheme so you can click on “Authorize”, paste the token `/auth/login` and test any protected route without manually rewriting the header.

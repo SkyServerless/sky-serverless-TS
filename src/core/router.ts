@@ -1,7 +1,57 @@
 import { Handler } from "./context";
 import { SkyHttpMethod } from "./http";
 
-export interface RouteMeta extends Record<string, unknown> {}
+export interface RouteDocResponseContent extends Record<string, unknown> {
+  schema?: unknown;
+  example?: unknown;
+  examples?: Record<string, unknown>;
+}
+
+export interface RouteDocResponse extends Record<string, unknown> {
+  description?: string;
+  content?: Record<string, RouteDocResponseContent>;
+  headers?: Record<string, unknown>;
+}
+
+export type RouteDocResponses = Record<string, RouteDocResponse | string>;
+
+export interface RouteDocBodyContent extends Record<string, unknown> {
+  schema?: unknown;
+  example?: unknown;
+  examples?: Record<string, unknown>;
+}
+
+export interface RouteDocRequestBody extends Record<string, unknown> {
+  description?: string;
+  required?: boolean;
+  content?: Record<string, RouteDocBodyContent>;
+}
+
+export type RouteDocParameterLocation =
+  | "query"
+  | "header"
+  | "path"
+  | "cookie";
+
+export interface RouteDocParameter extends Record<string, unknown> {
+  name: string;
+  in: RouteDocParameterLocation;
+  description?: string;
+  required?: boolean;
+  schema?: Record<string, unknown>;
+  deprecated?: boolean;
+  allowEmptyValue?: boolean;
+  example?: unknown;
+}
+
+export interface RouteMeta extends Record<string, unknown> {
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  responses?: RouteDocResponses;
+  requestBody?: RouteDocRequestBody;
+  parameters?: RouteDocParameter[];
+}
 
 export interface RouteDefinition<
   THandler extends Handler = Handler,
