@@ -1,404 +1,330 @@
-# SkyServerless-TS
+# Sky Framework
 
-SkyServerless-TS is a TypeScript-first toolkit for building portable HTTP workloads with a lightweight plugin system. It provides the essentials—routing, context, adapters, and infrastructure plugins—without locking you into Express/Fastify.
+**Version:** 0.1.0
+**Status:** Early / Experimental
+**Philosophy:** Serverless-First, Provider-Agnostic
 
-## Table of Contents
+Sky is a **TypeScript-first, serverless-first framework** for building portable HTTP workloads without locking your application to a specific cloud provider.
 
-1. [Features](#features)
-2. [Project Layout](#project-layout)
-3. [Getting Started](#getting-started)
-4. [Usage Example](#usage-example)
-5. [Data Plugins](#data-plugins)
-6. [Docs & Auth Plugins](#docs--auth-plugins)
-7. [Testing & Quality](#testing--quality)
+It ships with a lightweight HTTP core, a plugin system, and a CLI that standardizes local development, builds, and deployment packaging — while keeping infrastructure concerns at the edges.
 
-## Features
+---
 
-- **Framework-agnostic HTTP core** with routing, context propagation, and provider adapters.
-- **Plugin lifecycle** (`setup`, `onRequest`, `onResponse`, `onError`, `extendOpenApi`) for cross-cutting concerns.
-- **Native data plugins** covering MySQL, MSSQL, Redis, and a Redis-backed cache helper.
-- **First-class TypeScript support** including strict type checking and Vitest-based coverage.
-- **Examples and adapters** that demonstrate running on Node HTTP, OpenShift, and GCP functions.
-- **Sky CLI** that scaffolds apps/plugins and provides `dev`, `build`, and `deploy` helpers.
+## Why Sky Exists
 
-## Project Layout
+Modern “serverless” development often leads to **strong vendor lock-in**:
 
-- `src/core`: HTTP primitives (`App`, `Router`, `SkyContext`, response helpers, adapters).
-- `src/plugins/data`: Infrastructure plugins (`mysql`, `mssql`, `redis`, `cache`) plus shared types.
-- `examples`: Minimal runnable apps (`sky-http-hello`, `openshift`, `gcp`) built on the core.
-- `tests`: Vitest suites with full coverage for data plugins and core behavior.
-- `backlog`: Product roadmap with epics and tasks that guide the implementation order.
+* Business logic written directly against AWS Lambda, GCP Functions, or Azure Functions APIs
+* Frameworks that claim portability but still depend on provider-specific runtimes
+* Local development environments that do not match production behavior
+* Costly rewrites when migrating between providers
 
-## Getting Started
+Sky addresses this problem at the **architectural level**.
 
-### Prerequisites
+> Your application should not know where it runs.
+> The runtime should adapt to your application — not the other way around.
 
-- Node.js 20+
-- npm 10+ (ships with Node 20)
+---
 
-### Install Dependencies
+## Core Principles
 
-```bash
-npm install
+### 1. Serverless-First by Design
+
+Sky is not a traditional web framework adapted to serverless.
+
+It is designed from the ground up for:
+
+* Event-driven HTTP execution
+* Stateless request handling
+* Explicit initialization
+* Short-lived runtimes
+* Predictable lifecycle hooks
+
+There is no Express, no Fastify, and no hidden globals.
+
+---
+
+### 2. Provider-Agnostic Architecture
+
+Your application code is written against a **portable HTTP core**.
+
+Cloud providers are integrated through **adapters**, which live entirely outside your business logic.
+
+```
+┌────────────────┐
+│   Application  │   ← business logic
+└───────┬────────┘
+        │
+┌───────▼────────┐
+│    Sky Core    │   ← routing, context, plugins
+└───────┬────────┘
+        │
+┌───────▼────────────────┐
+│   Provider Adapter      │   ← AWS / GCP / Local / etc.
+└────────────────────────┘
 ```
 
-Optional peer services (MySQL, SQL Server, Redis) are declared as `optionalDependencies`. Install them if you plan to run the respective plugins locally:
+Switching providers does **not** require rewriting your application — only changing the adapter.
 
-```bash
-npm install mysql2 mssql ioredis
-```
+---
 
-### Build the CLI
+### 3. Explicit Boundaries
 
-The `sky` CLI compiles to `dist/cli/index.js`. Run the local build once before invoking the binary so consumers don’t need `ts-node`:
+Sky enforces clear separation between:
 
-```bash
-npm run build:cli
-```
+* **Application logic**
+* **HTTP/runtime mechanics**
+* **Infrastructure and deployment**
 
-The `bin/sky.js` launcher loads the compiled file when it exists; if not, it falls back to ts-node for development.
+This separation is reflected in:
 
-### Link the CLI (optional)
+* Project structure
+* Build configuration
+* Provider entrypoints
 
-If you want `sky` available globally while iterating on the repo (and make the scaffolds resolve `sky-serverless` without hitting npm), link it:
+---
 
-```bash
-npm link
-```
+## What Sky Is (and Is Not)
 
-Now you can run commands such as `sky --help` or `sky new demo-api` anywhere, and every scaffold will depend on this local copy of the framework. Inside the generated project, run `npm link sky-serverless` (followed by `npm install`) so the app resolves the dependency locally instead of fetching from the registry. Use `npm unlink -g sky-serverless` when finished and `npm unlink --global`.
+### Sky Is
 
-#### List all links 
-```
-npm ls -g --depth=0 --link=true
-```
+* A serverless-first HTTP framework
+* A portability layer for cloud functions
+* A plugin-driven runtime
+* A CLI-driven development workflow
 
-### Run an Example
+### Sky Is Not
 
-```bash
-npm run example:hello
-```
+* A replacement for cloud providers
+* A magic abstraction over provider limitations
+* A full PaaS
+* A framework that hides infrastructure complexity
 
-This command boots the `examples/sky-http-hello` adapter via Node HTTP + ts-node so you can hit `http://localhost:3000`.
+Sky gives you **control and freedom**, not illusions.
 
-## Usage Example
-
-Create an app with the HTTP core and register plugins during construction:
-
-```ts
-import { App } from "./src/core/app";
-import {
-  mysqlPlugin,
-  mssqlPlugin,
-  redisPlugin,
-  cachePlugin,
-  MysqlClient,
-} from "./src/plugins/data";
-
-const app = new App({
-  plugins: [
-    mysqlPlugin({ connectionString: process.env.SKY_MYSQL_URI }),
-    mssqlPlugin({ connectionString: process.env.SKY_MSSQL_CONN_STR }),
-    redisPlugin({ connectionString: process.env.SKY_REDIS_URI }),
-    cachePlugin(),
-  ],
-});
-
-app.get("/users", async (_req, ctx) => {
-  const mysql = ctx.services.mysql as MysqlClient;
-  return mysql.query("SELECT * FROM users WHERE status = ?", ["active"]);
-});
-```
-
-Adapters (`examples/*`) expose the app as the runtime-specific handler. See `examples/sky-http-hello/server.ts` for a complete integration.
+---
 
 ## Sky CLI
 
-The CLI lives in `src/cli/index.ts` and is exposed via the `sky` binary (declared in `package.json#bin`). After running `npm run build:cli` (and optionally `npm link`), you can:
+The Sky CLI orchestrates the development lifecycle while keeping your code provider-agnostic.
 
-- `sky new <name> [--db=mysql] [--cache=redis] [--provider=openshift]`: scaffold a framework project with Sky Core, plugins, and provider entrypoints.
-- `sky plugin new <name>`: scaffold a plugin package with `package.json`, `tsconfig`, README, and a sample `SkyPlugin`.
-- `sky dev [--watch] [--entry=src/app.ts] [--port=3000]`: spin up the Node HTTP adapter with auto-restart.
-- `sky build [--provider=gcp] [--outDir=dist]`: compile a provider entry (reads `sky.config.*`).
-- `sky deploy [--provider=openshift]`: run the build and copy artifacts into `dist/deploy/<provider>` with a manifest.
+### Usage
 
-Each command accepts `--help` for full options. The scaffolds include a `sky.config.json` so the CLI knows which entrypoint to compile/run. When the compiled bundle is missing the bin will fall back to ts-node, but shipping the prebuilt JS keeps downstream installs lightweight.
-
-## Data Plugins
-
-Each plugin lives in `src/plugins/data` and is exported via `src/plugins/data/index.ts`. You can provide options directly or rely on environment variables.
-
-### `@sky/mysql`
-
-- Injects a `MysqlClient` under `ctx.services.mysql` with `query<T>`, `rawQuery<T>`, `getPool`, and `close`.
-- Configuration:
-  - `connectionString`/`uri`: DSN such as `mysql://user:pass@host:3306/db?connectionLimit=10`
-  - `connection`: object mirroring `mysql2/promise` pool options
-  - `envKey` (default `SKY_MYSQL_URI`), `serviceKey` override, and custom `poolFactory`
-- Internally caches a single `mysql2/promise` pool; `client.close()` drains and resets it.
-
-### `@sky/mssql`
-
-- Adds a `MssqlClient` at `ctx.services.mssql` with `query<T>`, `getPool`, and `close`.
-- Parameters accept raw values or `{ value, type }` for explicit SQL Server data types.
-- Configuration mirrors the MySQL plugin: `connectionString`/`uri`, `config`, `envKey` (`SKY_MSSQL_CONN_STR`), `serviceKey`, and `poolFactory`.
-- Uses `mssql.ConnectionPool`; `client.close()` disposes of the cached pool.
-
-### `@sky/redis`
-
-- Exposes a `RedisLike` client (ioredis instance) at `ctx.services.redis`.
-- Configure with `connectionString`, `uri`, or `connection` (host, port, username, password, TLS, DB, keyPrefix).
-- Defaults to `SKY_REDIS_URI`. Override `serviceKey` or provide your own `clientFactory`/`getRedisClient`.
-
-### `@sky/cache`
-
-- Offers a `CacheHelper` at `ctx.services.cache` with `get`, `set`, `del`, and `wrap`.
-- Relies on Redis by default (`ctx.services.redis`). You can pass an explicit `redisClient`, supply `getRedisClient(context)`, or change `redisServiceKey`.
-- Options:
-  - `keyPrefix` to namespace keys (e.g., `"myapp:cache"`)
-  - `defaultTtlSeconds` plus per-call overrides
-  - Custom `serializer`/`deserializer` implementations
-- `wrap(key, ttl, fetcher)` reads from cache, calls `fetcher` on misses, persists non-`undefined` values, and returns the fresh payload.
-
-## Docs & Auth Plugins
-
-The documentation/authentication backlog (`backlog/05-plugins-doc-auth.yaml`) defines the acceptance criteria for both plugins that now ship with the toolkit:
-
-1. **DOC-1 – `@sky/swagger`**: automatically mirror every registered route into an OpenAPI document plus a Swagger UI served by the framework.
-2. **AUTH-1 – `@sky/auth-jwt`**: middleware-only authentication helpers that validate JWTs (headers or cookies) and expose helpers so apps can implement their own auth flows.
-
-### `@sky/swagger`
-
-- Mirrors router metadata into an OpenAPI 3.1 document available at `/docs.json` and serves Swagger UI at `/docs`. Override `jsonPath`, `uiPath`, `uiTitle`, or the OpenAPI version (`openapi`) if you want custom endpoints or branding.
-- Route metadata accepts `summary`, `description`, `tags`, `responses` (plain strings or `{ description, content, headers }` objects), `requestBody` definitions (`description`, `required`, `content`) for payloads, and `parameters` arrays (query, header, path, cookie) so the Swagger UI can render both body and input controls.
-- `requestBody` follows the OpenAPI structure:
-  - `description`: short explanation of the payload.
-  - `required`: boolean flag to enforce input before enabling “Try it out”.
-  - `content`: keyed by media type; each entry can specify `schema`, `example`, and `examples` to render JSON editors or form-data inputs.
-- `parameters` are arrays with `{ name, in, description, required, schema, example }` entries. `in` accepts `query`, `header`, `path`, and `cookie`, mirroring the OpenAPI spec so Swagger UI renders text boxes, selects, or checkboxes automatically.
-- Configuration:
-  - `info`, `servers`, `tags`, and `components` (incluindo `securitySchemes`) to enrich the document.
-  - `security` (requirements matrix) to apply global authentication to Swagger UI routes.
-  - `includeDocsEndpoints` to optionally expose the `/docs`/`/docs.json` routes inside the document (disabled by default to keep docs internals hidden).
-
-```ts
-import { swaggerPlugin } from "./src/plugins/doc";
-import { httpOk } from "./src/core/http/responses";
-
-const app = new App({
-  plugins: [
-    swaggerPlugin({
-      info: { title: "Billing API", version: "1.2.3" },
-      servers: [{ url: "https://api.example.com" }],
-      jsonPath: "/swagger.json",
-      uiPath: "/swagger",
-    }),
-  ],
-});
-
-app.get(
-  "/invoices/:id",
-  () => httpOk({ ok: true }),
-  {
-    summary: "Invoice detail",
-    tags: ["billing"],
-    parameters: [
-      {
-        name: "id",
-        in: "path",
-        required: true,
-        schema: { type: "string" },
-      },
-      {
-        name: "includeLines",
-        in: "query",
-        description: "Expand invoice with line items.",
-        schema: { type: "boolean" },
-      },
-      {
-        name: "x-correlation-id",
-        in: "header",
-        description: "Trace identifier for observability.",
-        schema: { type: "string" },
-      },
-    ],
-    responses: {
-      200: { description: "Invoice payload" },
-      404: "Invoice not found",
-    },
-  },
-);
-
-app.post(
-  "/invoices",
-  () => httpOk({ created: true }),
-  {
-    summary: "Create invoice",
-    tags: ["billing"],
-    parameters: [
-      {
-        name: "x-request-id",
-        in: "header",
-        description: "Optional idempotency key.",
-        schema: { type: "string" },
-      },
-    ],
-    requestBody: {
-      description: "Invoice payload",
-      required: true,
-      content: {
-        "application/json": {
-          schema: {
-            type: "object",
-            properties: {
-              customerId: { type: "string" },
-              amount: { type: "number" },
-            },
-            required: ["customerId", "amount"],
-          },
-          examples: {
-            sample: {
-              value: { customerId: "cust-1", amount: 120.5 },
-            },
-          },
-        },
-      },
-    },
-    responses: {
-      201: { description: "Invoice created" },
-    },
-  },
-);
+```bash
+sky <command> [options]
 ```
 
-### `@sky/auth-jwt`
+### Commands
 
-- Pure middleware: validates JWT access tokens on every request (Authorization header by default, optional cookie) and injects the resolved user into `ctx.services.user` and `request.user`.
-- Offers helper utilities (via `ctx.services.auth`) so you can implement your own login/refresh/logout flows without the framework touching your database. Helpers include `signAccessToken`, `signRefreshToken`, `issueTokens`, and `verifyToken`.
-- Configuration:
-  - `jwtSecret` (or fallback env `SKY_AUTH_JWT_SECRET` defined in AUTH-1.1), `accessTokenTtlSeconds`, `refreshTokenTtlSeconds`.
-  - `algorithm` (default `HS256`). Set to `RS256` e fornecer `privateKey`/`publicKey` (ou variáveis `SKY_AUTH_JWT_PRIVATE_KEY`/`SKY_AUTH_JWT_PUBLIC_KEY`) para usar chaves assimétricas.
-  - `cookieName`: nome do cookie cuja leitura deve ser tentada quando não houver header `Authorization`.
-  - `userServiceKey`/`authServiceKey`: mudam os registries (`ctx.services.user` e `.auth`) caso você queira isolar contextos.
-  - `tokenResolver(request, context)`: estratégia personalizada para extrair tokens (útil para cabeçalhos proprietários, WebSockets, etc.).
-  - `resolveUser(payload, context)`: reidrata seu usuário (buscando no banco, cache, etc.) antes de expô-lo ao handler; retorne `null` para bloquear o request.
+| Command                   | Description                      |
+| ------------------------- | -------------------------------- |
+| `sky new <name>`          | Scaffold a new Sky application   |
+| `sky plugin new <name>`   | Scaffold a Sky plugin            |
+| `sky dev [--watch]`       | Run the local development server |
+| `sky build [--provider]`  | Build a provider artifact        |
+| `sky deploy [--provider]` | Package a deploy artifact        |
 
-```ts
-import { httpError, httpOk } from "./src/core/http/responses";
-import { authPlugin, AuthHelpers, AuthUser } from "./src/plugins/auth";
+### Global Options
 
-const app = new App({
-  plugins: [
-    authPlugin({
-      config: {
-        jwtSecret: process.env.SKY_AUTH_JWT_SECRET!,
-        cookieName: "myapp.auth",
-        accessTokenTtlSeconds: 30 * 60,
-        refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
-      },
-      async resolveUser(payload) {
-        // Optionally fetch extra fields from your database.
-        return userRepo.findById(payload.sub) as Promise<AuthUser | null>;
-      },
-    }),
-  ],
-});
+| Option          | Description      |
+| --------------- | ---------------- |
+| `-h, --help`    | Show help        |
+| `-v, --version` | Show CLI version |
 
-app.post("/login", async (req, ctx) => {
-  const user = await userRepo.verify(req.body.email, req.body.password);
-  if (!user) {
-    return httpError({ statusCode: 401, message: "Invalid credentials" });
-  }
-  const auth = ctx.services.auth as AuthHelpers;
-  const tokens = auth.issueTokens({ id: user.id, email: user.email });
-  return httpOk(tokens);
-}, {
-  summary: "Authenticate user",
-  tags: ["auth"],
-  requestBody: {
-    description: "Credentials payload",
-    required: true,
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          properties: {
-            email: { type: "string", format: "email" },
-            password: { type: "string" },
-          },
-          required: ["email", "password"],
-        },
-        examples: {
-          demo: {
-            value: { email: "ada@example.com", password: "pass-ada" },
-          },
-        },
-      },
-    },
-  },
-  responses: {
-    200: { description: "JWT pair" },
-    401: "Invalid credentials",
-  },
-});
+---
 
-app.get("/profile", (_req, ctx) => {
-  const user = ctx.services.user as AuthUser | undefined;
-  if (!user) {
-    return httpError({ statusCode: 401, message: "Unauthorized" });
-  }
-  return httpOk({ user });
-}, {
-  summary: "Current profile",
-  tags: ["auth"],
-  parameters: [
-    {
-      name: "Authorization",
-      in: "header",
-      description: "Bearer access token",
-      required: true,
-      schema: { type: "string" },
-    },
-  ],
-  responses: {
-    200: { description: "User payload" },
-    401: "Missing/invalid token",
-  },
-});
+## Project Structure
 
-// Configure RS256 (public/private key pair) instead of shared secrets:
-const rsaApp = new App({
-  plugins: [
-    authPlugin({
-      config: {
-        algorithm: "RS256",
-        privateKey: process.env.SKY_AUTH_JWT_PRIVATE_KEY!,
-        publicKey: process.env.SKY_AUTH_JWT_PUBLIC_KEY,
-      },
-    }),
-  ],
-});
+A project created with `sky new` looks like this:
+
+```txt
+.
+├── src/
+│   ├── app.ts
+│   └── providers/
+│       └── local.ts
+├── sky.config.json
+├── tsconfig.json
+├── package.json
+├── README.md
+└── .gitignore
 ```
 
-## Testing & Quality
+This structure is intentional:
 
-- Run the entire suite:
+* `app.ts` contains **pure application logic**
+* `providers/*` contain **runtime-specific adapters**
+* `sky.config.json` describes how the CLI builds and runs the project
 
-  ```bash
-  npm test
-  ```
+---
 
-- Generate coverage (base + plugins):
+## Application Core
 
-  ```bash
-  npm run test:coverage
-  ```
+### `src/app.ts`
 
-- Type-check the project:
+```ts
+import { App, httpOk } from "sky-serverless";
 
-  ```bash
-  npm exec tsc -- --noEmit
-  ```
+export function createApp(): App {
+  const app = new App({});
 
-Targeted coverage profiles live in `package.json` (`coverage:plugins` enforces 100% on `src/plugins/data/**`). Continuous integration should run `npm test` and `npm exec tsc -- --noEmit` at a minimum.
-  - `components.securitySchemes` lets you define auth flows for the UI. The demo registers a `bearerAuth` scheme so you can click on “Authorize”, paste the token `/auth/login` and test any protected route without manually rewriting the header.
+  app.get("/hello", () => {
+    return httpOk({ message: "Hello from Sky" });
+  });
+
+  app.get("/health", () => httpOk({ status: "ok" }));
+
+  return app;
+}
+```
+
+Key characteristics:
+
+* No dependency on Node, Express, or cloud APIs
+* Routes return typed HTTP responses
+* Plugins and services are injected explicitly
+
+---
+
+## Local Provider (Development)
+
+### `src/providers/local.ts`
+
+```ts
+import {
+  createHttpHandler,
+  createNodeHttpAdapter,
+  startNodeHttpServer
+} from "sky-serverless";
+
+import { createApp } from "../app";
+
+const app = createApp();
+const adapter = createNodeHttpAdapter({ providerName: "local-dev" });
+
+export const handler = createHttpHandler(adapter, app);
+
+export function start() {
+  const port = Number(process.env.PORT ?? process.env.SKY_DEV_PORT ?? 3000);
+  return startNodeHttpServer(app, { port });
+}
+
+if (require.main === module) {
+  start();
+}
+```
+
+This provider:
+
+* Adapts Sky to Node’s HTTP runtime
+* Exists **only for local development**
+* Is not a cloud provider implementation
+
+---
+
+## Development Workflow
+
+```bash
+npm run dev
+```
+
+* Runs a local HTTP server
+* Supports watch mode
+* Mimics serverless execution semantics as closely as possible
+
+---
+
+## Build and Deploy (Current State)
+
+```bash
+npm run build
+npm run deploy
+```
+
+### Important Note (v0.1.1)
+
+At this stage:
+
+* ✅ Projects run **locally only**
+* ❌ No real cloud provider integrations yet
+* ❌ `deploy` does **not** deploy to AWS/GCP/Azure
+* ✅ `deploy` only packages artifacts
+
+This is intentional.
+Sky stabilizes **contracts before integrations**.
+
+---
+
+## sky-serverless Runtime
+
+Sky applications run on top of `sky-serverless`, which provides:
+
+* Core HTTP primitives (`App`, routing, context)
+* Plugin lifecycle hooks
+* Data plugins (MySQL, MSSQL, Redis, Cache)
+* Documentation (Swagger) and Auth (JWT) plugins
+* Multiple adapters (Node HTTP today, cloud in progress)
+
+The runtime is framework-agnostic and fully typed.
+
+---
+
+## Vendor Lock-in: The Real Problem
+
+Most serverless projects fail portability not because of business logic, but because:
+
+* Handlers are written against provider APIs
+* Middleware relies on proprietary request objects
+* Frameworks leak infrastructure details
+* Tests depend on cloud runtimes
+
+Sky eliminates this by design.
+
+Your application never imports:
+
+* `aws-lambda`
+* `@google-cloud/functions-framework`
+* Provider SDKs
+
+Those belong in adapters — not in your app.
+
+---
+
+## Current Limitations
+
+Sky v0.1.1 intentionally has constraints:
+
+* No production cloud providers yet
+* No multi-provider deploys
+* No bundled artifacts per provider
+* No hot reload outside local Node
+
+These are roadmap items, not oversights.
+
+---
+
+## When Sky Makes Sense
+
+Sky is a strong choice if:
+
+* You want to start serverless without committing to a provider
+* You care about long-term portability
+* You want realistic local development
+* You plan to evolve infrastructure over time
+* You value explicit architecture
+
+---
+
+## In One Sentence
+
+> **Sky is a serverless-first framework that prevents cloud vendor lock-in by cleanly separating application logic from runtime and provider infrastructure.**
+
+---
+
+## Roadmap Direction (High Level)
+
+* Define and stabilize the provider contract
+* Implement the first production cloud provider
+* Produce self-contained build artifacts
+* Enable multi-provider targets from a single codebase
+* Reach v1.0 with stable APIs
