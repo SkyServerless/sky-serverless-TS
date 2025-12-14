@@ -60,13 +60,18 @@ The `bin/sky.js` launcher loads the compiled file when it exists; if not, it fal
 
 ### Link the CLI (optional)
 
-If you want `sky` available globally while iterating on the repo (and make the scaffolds resolve `sky-serverless-ts` without hitting npm), link it:
+If you want `sky` available globally while iterating on the repo (and make the scaffolds resolve `sky-serverless` without hitting npm), link it:
 
 ```bash
 npm link
 ```
 
-Now you can run commands such as `sky --help` or `sky new demo-api` anywhere, and every scaffold will depend on this local copy of the framework. Inside the generated project, run `npm link sky-serverless-ts` (followed by `npm install`) so the app resolves the dependency locally instead of fetching from the registry. Use `npm unlink sky-serverless-ts` when finished and `npm unlink --global`.
+Now you can run commands such as `sky --help` or `sky new demo-api` anywhere, and every scaffold will depend on this local copy of the framework. Inside the generated project, run `npm link sky-serverless` (followed by `npm install`) so the app resolves the dependency locally instead of fetching from the registry. Use `npm unlink -g sky-serverless` when finished and `npm unlink --global`.
+
+#### List all links 
+```
+npm ls -g --depth=0 --link=true
+```
 
 ### Run an Example
 

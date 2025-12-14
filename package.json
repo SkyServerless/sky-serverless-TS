@@ -1,13 +1,23 @@
 {
   "name": "sky-serverless",
-  "version": "0.1.0",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "version": "0.1.1",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "sky": "bin/sky.js"
   },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:core && npm run build:cli",
+    "build:core": "tsc -p tsconfig.build.json",
     "build:cli": "tsc -p tsconfig.cli.json",
+    "prepublishOnly": "npm run build",
     "dev": "ts-node --project tsconfig.json examples/sky-http-hello/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -21,6 +31,7 @@
     "example:gcp": "ts-node --project tsconfig.json examples/gcp/server.ts",
     "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js"
   },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.19.26",
     "@vitest/coverage-v8": "^4.0.15",
@@ -28,7 +39,6 @@
     "typescript": "^5.4.5",
     "vitest": "^4.0.15"
   },
-  "dependencies": {},
   "optionalDependencies": {
     "ioredis": "^5.4.1",
     "mssql": "^12.2.0",

@@ -572,7 +572,7 @@ async function loadApp(entryPath: string): Promise<App> {
   } catch (error) {
     if (isMissingSkyModuleError(error)) {
       const hint =
-        'Install dependencies inside the generated project (e.g. "npm install" or "npm link sky-serverless-ts && npm install").';
+        'Install dependencies inside the generated project (e.g. "npm install" or "npm link sky-serverless && npm install").';
       throw new Error(`${(error as Error).message}\n${hint}`);
     }
     throw error;
@@ -731,7 +731,7 @@ function createProjectPackageJson(name: string, provider: ProviderOption): strin
         deploy: `sky deploy --provider=${defaultProvider}`,
       },
       dependencies: {
-        "sky-serverless-ts": `^${CLI_VERSION}`,
+        "sky-serverless": `^${CLI_VERSION}`,
       },
       devDependencies: {
         typescript: ROOT_DEP_VERSIONS.typescript ?? "^5.4.5",
@@ -818,12 +818,12 @@ Generated with the Sky CLI.
 
 function createAppSource(db: DbOption, cache: CacheOption): string {
   const imports = new Set<string>();
-  imports.add(`import { App, httpOk } from "sky-serverless-ts";`);
+  imports.add(`import { App, httpOk } from "sky-serverless";`);
   const pluginLines: string[] = [];
 
   if (db === "mysql") {
     imports.add(
-      `import { mysqlPlugin, MysqlClient } from "sky-serverless-ts";`,
+      `import { mysqlPlugin, MysqlClient } from "sky-serverless";`,
     );
     pluginLines.push(
       `    mysqlPlugin({ connectionString: process.env.SKY_MYSQL_URI }),`,
@@ -831,7 +831,7 @@ function createAppSource(db: DbOption, cache: CacheOption): string {
   }
 
   if (cache === "redis") {
-    imports.add(`import { redisPlugin, cachePlugin } from "sky-serverless-ts";`);
+    imports.add(`import { redisPlugin, cachePlugin } from "sky-serverless";`);
     pluginLines.push(`    redisPlugin({ connectionString: process.env.SKY_REDIS_URI }),`);
     pluginLines.push(`    cachePlugin({ keyPrefix: "sky-cache" }),`);
   }
@@ -884,7 +884,7 @@ ${dbRoute}${cacheRoute}
 
 function createProviderEntrySource(provider: ProviderOption): string {
   if (provider === "local") {
-    return `import { createHttpHandler, createNodeHttpAdapter, startNodeHttpServer } from "sky-serverless-ts";
+    return `import { createHttpHandler, createNodeHttpAdapter, startNodeHttpServer } from "sky-serverless";
 import { createApp } from "../app";
 
 const app = createApp();
@@ -903,7 +903,7 @@ if (require.main === module) {
   }
 
   if (provider === "openshift") {
-    return `import { createHttpHandler, OpenShiftProviderAdapter } from "sky-serverless-ts";
+    return `import { createHttpHandler, OpenShiftProviderAdapter } from "sky-serverless";
 import { createApp } from "../app";
 
 const adapter = new OpenShiftProviderAdapter();
@@ -913,7 +913,7 @@ export default handler;
 `;
   }
 
-  return `import { createHttpHandler, GcpFunctionsProviderAdapter } from "sky-serverless-ts";
+  return `import { createHttpHandler, GcpFunctionsProviderAdapter } from "sky-serverless";
 import { createApp } from "../app";
 
 const adapter = new GcpFunctionsProviderAdapter();
@@ -935,10 +935,10 @@ function createPluginPackageJson(packageName: string): string {
         dev: "tsc -w -p tsconfig.json",
       },
       peerDependencies: {
-        "sky-serverless-ts": `^${CLI_VERSION}`,
+        "sky-serverless": `^${CLI_VERSION}`,
       },
       devDependencies: {
-        "sky-serverless-ts": `^${CLI_VERSION}`,
+        "sky-serverless": `^${CLI_VERSION}`,
         typescript: ROOT_DEP_VERSIONS.typescript ?? "^5.4.5",
       },
     },
@@ -972,7 +972,7 @@ Generated with the Sky CLI.
 ## Usage
 
 \`\`\`ts
-import { App } from "sky-serverless-ts";
+import { App } from "sky-serverless";
 import { createPlugin } from "${packageName}";
 
 const app = new App({
@@ -988,7 +988,7 @@ const app = new App({
 
 function createPluginSource(packageName: string): string {
   const functionName = toPascalCase(packageName.replace(/^@[^/]+\//, ""));
-  return `import type { SkyPlugin } from "sky-serverless-ts";
+  return `import type { SkyPlugin } from "sky-serverless";
 
 export interface ${functionName}PluginOptions {
   greeting?: string;
@@ -1178,7 +1178,7 @@ function isMissingSkyModuleError(error: unknown): boolean {
   return (
     code === "MODULE_NOT_FOUND" &&
     typeof message === "string" &&
-    message.includes("sky-serverless-ts")
+    message.includes("sky-serverless")
   );
 }
 
