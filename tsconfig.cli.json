@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "module": "CommonJS",
+    "target": "ES2019"
+  },
+  "include": ["src/cli/index.ts"]
+}

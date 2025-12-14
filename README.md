@@ -19,6 +19,7 @@ SkyServerless-TS is a TypeScript-first toolkit for building portable HTTP worklo
 - **Native data plugins** covering MySQL, MSSQL, Redis, and a Redis-backed cache helper.
 - **First-class TypeScript support** including strict type checking and Vitest-based coverage.
 - **Examples and adapters** that demonstrate running on Node HTTP, OpenShift, and GCP functions.
+- **Sky CLI** that scaffolds apps/plugins and provides `dev`, `build`, and `deploy` helpers.
 
 ## Project Layout
 
@@ -46,6 +47,26 @@ Optional peer services (MySQL, SQL Server, Redis) are declared as `optionalDepen
 ```bash
 npm install mysql2 mssql ioredis
 ```
+
+### Build the CLI
+
+The `sky` CLI compiles to `dist/cli/index.js`. Run the local build once before invoking the binary so consumers don’t need `ts-node`:
+
+```bash
+npm run build:cli
+```
+
+The `bin/sky.js` launcher loads the compiled file when it exists; if not, it falls back to ts-node for development.
+
+### Link the CLI (optional)
+
+If you want `sky` available globally while iterating on the repo (and make the scaffolds resolve `sky-serverless-ts` without hitting npm), link it:
+
+```bash
+npm link
+```
+
+Now you can run commands such as `sky --help` or `sky new demo-api` anywhere, and every scaffold will depend on this local copy of the framework. Inside the generated project, run `npm link sky-serverless-ts` (followed by `npm install`) so the app resolves the dependency locally instead of fetching from the registry. Use `npm unlink sky-serverless-ts` when finished and `npm unlink --global`.
 
 ### Run an Example
 
@@ -85,6 +106,18 @@ app.get("/users", async (_req, ctx) => {
 ```
 
 Adapters (`examples/*`) expose the app as the runtime-specific handler. See `examples/sky-http-hello/server.ts` for a complete integration.
+
+## Sky CLI
+
+The CLI lives in `src/cli/index.ts` and is exposed via the `sky` binary (declared in `package.json#bin`). After running `npm run build:cli` (and optionally `npm link`), you can:
+
+- `sky new <name> [--db=mysql] [--cache=redis] [--provider=openshift]`: scaffold a framework project with Sky Core, plugins, and provider entrypoints.
+- `sky plugin new <name>`: scaffold a plugin package with `package.json`, `tsconfig`, README, and a sample `SkyPlugin`.
+- `sky dev [--watch] [--entry=src/app.ts] [--port=3000]`: spin up the Node HTTP adapter with auto-restart.
+- `sky build [--provider=gcp] [--outDir=dist]`: compile a provider entry (reads `sky.config.*`).
+- `sky deploy [--provider=openshift]`: run the build and copy artifacts into `dist/deploy/<provider>` with a manifest.
+
+Each command accepts `--help` for full options. The scaffolds include a `sky.config.json` so the CLI knows which entrypoint to compile/run. When the compiled bundle is missing the bin will fall back to ts-node, but shipping the prebuilt JS keeps downstream installs lightweight.
 
 ## Data Plugins
 

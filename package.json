@@ -1,7 +1,13 @@
 {
   "name": "sky-serverless-ts",
   "version": "0.1.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "bin": {
+    "sky": "bin/sky.js"
+  },
   "scripts": {
+    "build:cli": "tsc -p tsconfig.cli.json",
     "dev": "ts-node --project tsconfig.json examples/sky-http-hello/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -22,6 +28,7 @@
     "typescript": "^5.4.5",
     "vitest": "^4.0.15"
   },
+  "dependencies": {},
   "optionalDependencies": {
     "ioredis": "^5.4.1",
     "mssql": "^12.2.0",
