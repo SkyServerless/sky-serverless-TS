@@ -35,9 +35,7 @@ export async function deployToGcp(options: GcpDeployOptions): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const isWin = process.platform === "win32";
-    const gcloudCmd = isWin ? "gcloud.cmd" : "gcloud";
-    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit" });
+    const gcloud = spawnCommand("gcloud", args);
 
     gcloud.on("close", (code) => {
       if (code === 0) {
@@ -76,9 +74,7 @@ export async function removeFromGcp(options: GcpRemoveOptions): Promise<void> {
   }
 
   return new Promise((resolve, reject) => {
-    const isWin = process.platform === "win32";
-    const gcloudCmd = isWin ? "gcloud.cmd" : "gcloud";
-    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit" });
+    const gcloud = spawnCommand("gcloud", args);
 
     gcloud.on("close", (code) => {
       if (code === 0) {
@@ -95,4 +91,25 @@ export async function removeFromGcp(options: GcpRemoveOptions): Promise<void> {
       reject(err);
     });
   });
+}
+
+function spawnCommand(command: string, args: string[]) {
+  if (process.platform !== "win32") {
+    return spawn(command, args, { stdio: "inherit" });
+  }
+
+  const cmdArgs = ["/d", "/s", "/c", buildCmdLine(command, args)];
+  return spawn("cmd.exe", cmdArgs, { stdio: "inherit" });
+}
+
+function buildCmdLine(command: string, args: string[]): string {
+  return [command, ...args.map(escapeCmdArg)].join(" ");
+}
+
+function escapeCmdArg(arg: string): string {
+  if (!arg.length) {
+    return '""';
+  }
+  const escaped = arg.replace(/(["^&|<>%!()])/g, "^$1");
+  return `"${escaped}"`;
 }
