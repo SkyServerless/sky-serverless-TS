@@ -37,7 +37,7 @@ export async function deployToGcp(options: GcpDeployOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     const isWin = process.platform === "win32";
     const gcloudCmd = isWin ? "gcloud.cmd" : "gcloud";
-    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit", shell: isWin });
+    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit" });
 
     gcloud.on("close", (code) => {
       if (code === 0) {
@@ -78,7 +78,7 @@ export async function removeFromGcp(options: GcpRemoveOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     const isWin = process.platform === "win32";
     const gcloudCmd = isWin ? "gcloud.cmd" : "gcloud";
-    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit", shell: isWin });
+    const gcloud = spawn(gcloudCmd, args, { stdio: "inherit" });
 
     gcloud.on("close", (code) => {
       if (code === 0) {
