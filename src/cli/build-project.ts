@@ -39,14 +39,11 @@ export async function buildProject(options: {
   if (!(await pathExists(compiledEntry))) {
     throw new Error(`Compiled entry ${compiledEntry} was not generated.`);
   }
-  const serverFile = path.join(outDir, "server.js");
-  await ensureDirectory(path.dirname(serverFile));
-  await fsp.copyFile(compiledEntry, serverFile);
 
   return {
     provider,
     outDir,
-    serverFile,
+    entrypointJs: compiledEntry,
     manifestDir: path.join(outDir, "deploy", provider),
   };
 }

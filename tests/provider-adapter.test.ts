@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/core/app";
 import { SkyContext } from "../src/core/context";
-import { ProviderAdapter, createHttpHandler } from "../src/core/provider-adapter";
+import { PayloadTooLargeError } from "../src/core/http";
+import {
+  ProviderAdapter,
+  createHttpHandler,
+  sanitizeRequestId,
+} from "../src/core/provider-adapter";
 import { httpOk } from "../src/core/http/responses";
 
 describe("HttpProviderAdapter integration", () => {
@@ -146,6 +151,157 @@ describe("HttpProviderAdapter integration", () => {
     const response = fromSkyResponse.mock.calls[0][0];
     expect(response.body).toMatchObject({
       details: { message: "Unknown error", detail: "boom" },
+    });
+  });
+
+  it("serializa detalhes genéricos quando adapter lança objeto", async () => {
+    const app = new App();
+    const fromSkyResponse = vi.fn();
+    const adapter: ProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
+      {
+        providerName: "fails-object",
+        toSkyRequest: () => {
+          throw { custom: "error" };
+        },
+        fromSkyResponse,
+      };
+
+    const handler = createHttpHandler(adapter, app);
+    await handler({ method: "GET" }, {});
+
+    const response = fromSkyResponse.mock.calls[0][0];
+    expect(response.body).toMatchObject({
+      details: { message: "Unknown error", detail: { custom: "error" } },
+    });
+  });
+
+  it("serializa detalhes de erro customizado", async () => {
+    class CustomError extends Error {
+        constructor(message: string, public code: string) {
+            super(message);
+            this.name = "CustomError";
+        }
+    }
+    const app = new App();
+    const fromSkyResponse = vi.fn();
+    const adapter: ProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
+      {
+        providerName: "fails-custom-error",
+        toSkyRequest: () => {
+          throw new CustomError("custom boom", "E_CUSTOM");
+        },
+        fromSkyResponse,
+      };
+
+    const handler = createHttpHandler(adapter, app);
+    await handler({ method: "GET" }, {});
+
+    const response = fromSkyResponse.mock.calls[0][0];
+    expect(response.body).toMatchObject({
+      details: {
+        message: "custom boom",
+        name: "CustomError",
+      },
+    });
+  });
+
+  it("retorna erro 413 quando o adapter lança PayloadTooLargeError", async () => {
+    const app = new App();
+    const fromSkyResponse = vi.fn();
+    const adapter: ProviderAdapter<{ method: string }, { statusCode?: number; body?: unknown }> =
+      {
+        providerName: "fails-payload",
+        toSkyRequest: () => {
+          throw new PayloadTooLargeError("payload too large", 100);
+        },
+        fromSkyResponse,
+      };
+
+    const handler = createHttpHandler(adapter, app);
+    await handler({ method: "GET" }, {});
+
+    expect(fromSkyResponse).toHaveBeenCalledTimes(1);
+    const response = fromSkyResponse.mock.calls[0][0];
+    expect(response.statusCode).toBe(413);
+    expect(response.body).toMatchObject({
+      message: "payload too large",
+      details: {
+        code: "payload_too_large",
+        limitBytes: 100,
+      }
+    });
+  });
+
+  it("usa services do contexto parcial", async () => {
+    const app = new App();
+    app.get("/ctx", () => httpOk("ctx"));
+
+    const contexts: SkyContext[] = [];
+    const adapter: ProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
+      providerName: "partial-services",
+      toSkyRequest: (rawReq) => ({ method: rawReq.method, path: rawReq.path, headers: {} }),
+      fromSkyResponse: (response, _rawRequest, rawResponse) => {
+        rawResponse.body = response.body;
+      },
+      createContext: () => {
+        const ctx = {
+          services: { db: true }
+        } as unknown as SkyContext;
+        contexts.push(ctx);
+        return ctx;
+      },
+    };
+
+    const handler = createHttpHandler(adapter, app);
+    const rawResponse: { body?: unknown } = {};
+    await handler({ method: "GET", path: "/ctx" }, rawResponse);
+
+    expect(contexts[0].services).toEqual({ db: true });
+  });
+
+
+  it("lida com services indefinidos no contexto parcial", async () => {
+    const app = new App();
+    app.get("/ctx", () => httpOk("ctx"));
+
+    const contexts: SkyContext[] = [];
+    const adapter: ProviderAdapter<{ method: string; path: string }, { body?: unknown }> = {
+      providerName: "partial-undefined-services",
+      toSkyRequest: (rawReq) => ({ method: rawReq.method, path: rawReq.path, headers: {} }),
+      fromSkyResponse: (response, _rawRequest, rawResponse) => {
+        rawResponse.body = response.body;
+      },
+      createContext: () => {
+        const ctx = {
+          provider: "should-be-overridden",
+          services: undefined
+        } as unknown as SkyContext;
+        contexts.push(ctx);
+        return ctx;
+      },
+    };
+
+    const handler = createHttpHandler(adapter, app);
+    const rawResponse: { body?: unknown } = {};
+    await handler({ method: "GET", path: "/ctx" }, rawResponse);
+
+    expect(rawResponse.body).toBe("ctx");
+    expect(contexts[0].provider).toBe("partial-undefined-services");
+    expect(contexts[0].requestId).toBeDefined();
+    expect(contexts[0].services).toEqual({});
+  });
+
+  describe("sanitizeRequestId", () => {
+    it("limita tamanho e remove caracteres inválidos", () => {
+      const dirty = "  req-💥-123!!!".padEnd(140, "x");
+      const sanitized = sanitizeRequestId(dirty);
+      expect(sanitized).toMatch(/^req-__-123__/);
+      expect(sanitized.length).toBeLessThanOrEqual(128);
+    });
+
+    it("retorna string vazia quando id é falsy", () => {
+      expect(sanitizeRequestId("")).toBe("");
+      expect(sanitizeRequestId("   ")).toBe("");
     });
   });
 });

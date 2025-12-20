@@ -57,33 +57,37 @@ function createGcpRequest(
   return request;
 }
 
-function createGcpResponse() {
+type MockGcpResponse = GcpResponse & {
+  payload?: unknown;
+  status: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  getHeaders(): Record<string, unknown>;
+};
+
+function createGcpResponse(): MockGcpResponse {
   const headers: Record<string, unknown> = {};
-  const response: GcpResponse & {
-    payload?: unknown;
-    status: ReturnType<typeof vi.fn>;
-    set: ReturnType<typeof vi.fn>;
-    send: ReturnType<typeof vi.fn>;
-  } = {
+  const response = {
     headersSent: false,
-    status: vi.fn(() => response),
-    set: vi.fn((field: string | Record<string, unknown>, value?: unknown) => {
-      if (typeof field === "string") {
-        headers[field.toLowerCase()] = value;
-      } else {
-        for (const [key, val] of Object.entries(field)) {
-          headers[key.toLowerCase()] = val;
-        }
+  } as MockGcpResponse;
+
+  response.status = vi.fn(() => response);
+  response.set = vi.fn((field: string | Record<string, unknown>, value?: unknown) => {
+    if (typeof field === "string") {
+      headers[field.toLowerCase()] = value;
+    } else {
+      for (const [key, val] of Object.entries(field)) {
+        headers[key.toLowerCase()] = val;
       }
-      return response;
-    }),
-    send: vi.fn((payload?: unknown) => {
-      response.headersSent = true;
-      response.payload = payload;
-    }),
-  };
-  (response as unknown as { getHeaders: () => Record<string, unknown> }).getHeaders = () =>
-    headers;
+    }
+    return response;
+  });
+  response.send = vi.fn((payload?: unknown) => {
+    response.headersSent = true;
+    response.payload = payload;
+  });
+  response.getHeaders = () => headers;
+
   return response;
 }
 
@@ -225,6 +229,42 @@ describe("GcpFunctionsProviderAdapter", () => {
     expect(booleanResponse.payload).toBe("true");
   });
 
+  it("remove headers hop-by-hop das respostas", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest();
+    const response = createGcpResponse();
+
+    await adapter.fromSkyResponse(
+      {
+        statusCode: 200,
+        body: { ok: true },
+        headers: {
+          connection: "keep-alive",
+          "x-data": "42",
+        },
+      },
+      request,
+      response,
+    );
+
+    expect(response.set).toHaveBeenCalledWith("x-data", "42");
+    expect(
+      (response as GcpResponse & { getHeaders(): Record<string, unknown> }).getHeaders(),
+    ).not.toHaveProperty("connection");
+  });
+
+  it("respeita maxBodySizeBytes quando rawBody excede o limite", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {}, maxBodySizeBytes: 4 });
+    const request = createGcpRequest({
+      rawBody: Buffer.from("0123456789"),
+      body: undefined,
+    });
+
+    await expect(adapter.toSkyRequest(request)).rejects.toMatchObject({
+      code: "payload_too_large",
+    });
+  });
+
   it("gera requestId quando headers não possuem trace-id", async () => {
     const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
     const request = createGcpRequest({
@@ -241,7 +281,8 @@ describe("GcpFunctionsProviderAdapter", () => {
   });
 
   it("propaga erro e retorna 500 quando set falha", async () => {
-    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const logger = vi.fn();
+    const adapter = new GcpFunctionsProviderAdapter({ logger });
     const request = createGcpRequest();
     const response: GcpResponse = {
       headersSent: false,
@@ -262,6 +303,7 @@ describe("GcpFunctionsProviderAdapter", () => {
       ),
     ).rejects.toThrow("boom");
 
+    expect(logger).toHaveBeenCalledWith("GCP adapter failed to send response", expect.any(Object));
     expect(statusMock).toHaveBeenLastCalledWith(500);
     expect(response.send).toHaveBeenCalledWith({ message: "Internal Server Error" });
   });
@@ -413,6 +455,7 @@ describe("GcpFunctionsProviderAdapter", () => {
     const request = createGcpRequest({
       rawBody: undefined,
       body: circular,
+      headers: { "content-type": "application/json" } as IncomingHttpHeaders,
     });
     await adapter.toSkyRequest(request);
     expect(logger).toHaveBeenCalledWith("Failed to serialize request body", expect.any(Object));
@@ -424,6 +467,128 @@ describe("GcpFunctionsProviderAdapter", () => {
     const request = createGcpRequest({ rawBody: undefined, body: undefined });
     const skyRequest = await adapter.toSkyRequest(request);
     expect(skyRequest.rawBody).toBeUndefined();
+  });
+
+  it("não tenta serializar objetos sem content-type JSON", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: { html: true },
+      headers: { "content-type": "text/html" } as IncomingHttpHeaders,
+    });
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(skyRequest.rawBody).toBeUndefined();
+  });
+
+  it("serializa objetos para content-type custom com +json", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: { custom: true },
+      headers: { "content-type": "application/vnd.company+json" } as IncomingHttpHeaders,
+    });
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(skyRequest.rawBody?.toString("utf-8")).toBe('{"custom":true}');
+  });
+
+  it("não serializa objetos quando content-type está ausente", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: { missing: true },
+      headers: { "content-type": undefined } as unknown as IncomingHttpHeaders,
+    });
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(skyRequest.rawBody).toBeUndefined();
+  });
+
+  it("ignora content-type sem tipo base ao serializar objetos", async () => {
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: { weird: true },
+      headers: { "content-type": "; charset=utf-8" } as IncomingHttpHeaders,
+    });
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(skyRequest.rawBody).toBeUndefined();
+  });
+
+  it("evita ler stream para GET sem payload anunciado", async () => {
+    const streamSpy = vi.spyOn(requestUtils, "readIncomingMessage");
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: undefined,
+      headers: {
+        "content-length": undefined,
+        "transfer-encoding": undefined,
+      } as IncomingHttpHeaders,
+    });
+    request.method = "GET";
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(streamSpy).not.toHaveBeenCalled();
+    expect(skyRequest.rawBody).toBeUndefined();
+    streamSpy.mockRestore();
+  });
+
+  it("considera arrays em transfer-encoding ao decidir stream", async () => {
+    const streamSpy = vi
+      .spyOn(requestUtils, "readIncomingMessage")
+      .mockResolvedValueOnce(Buffer.from('{"chunked":true}'));
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: undefined,
+      headers: {
+        "transfer-encoding": ["", "chunked"],
+      } as unknown as IncomingHttpHeaders,
+    });
+    request.method = "GET";
+
+    await adapter.toSkyRequest(request);
+    expect(streamSpy).toHaveBeenCalled();
+    streamSpy.mockRestore();
+  });
+
+  it("usa primeiro valor de content-length quando header é array", async () => {
+    const streamSpy = vi.spyOn(requestUtils, "readIncomingMessage");
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: undefined,
+      headers: {
+        "content-length": ["0", "99"],
+      } as unknown as IncomingHttpHeaders,
+    });
+    request.method = "HEAD";
+
+    await adapter.toSkyRequest(request);
+    expect(streamSpy).not.toHaveBeenCalled();
+    streamSpy.mockRestore();
+  });
+
+  it("lê stream para GET com content-length maior que zero", async () => {
+    const streamSpy = vi
+      .spyOn(requestUtils, "readIncomingMessage")
+      .mockResolvedValueOnce(Buffer.from('{"len":1}'));
+    const adapter = new GcpFunctionsProviderAdapter({ logger: () => {} });
+    const request = createGcpRequest({
+      rawBody: undefined,
+      body: undefined,
+      headers: {
+        "content-length": "10",
+      } as IncomingHttpHeaders,
+    });
+    request.method = "GET";
+
+    await adapter.toSkyRequest(request);
+    expect(streamSpy).toHaveBeenCalled();
+    streamSpy.mockRestore();
   });
 
   it("não aplica header JSON quando body é indefinido", async () => {

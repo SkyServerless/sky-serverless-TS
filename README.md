@@ -1,6 +1,6 @@
-# Sky Framework
+# SkyServerless-TS
 
-**Version:** 0.1.0
+**Version:** 0.2.0
 **Status:** Early / Experimental
 **Philosophy:** Serverless-First, Provider-Agnostic
 
@@ -8,43 +8,53 @@ Sky is a **TypeScript-first, serverless-first framework** for building portable 
 
 It ships with a lightweight HTTP core, a plugin system, and a CLI that standardizes local development, builds, and deployment packaging — while keeping infrastructure concerns at the edges.
 
----
-
 ## Why Sky Exists
 
 Modern “serverless” development often leads to **strong vendor lock-in**:
 
-* Business logic written directly against AWS Lambda, GCP Functions, or Azure Functions APIs
-* Frameworks that claim portability but still depend on provider-specific runtimes
-* Local development environments that do not match production behavior
-* Costly rewrites when migrating between providers
+- Business logic written directly against AWS Lambda, GCP Functions, or Azure Functions APIs
+- Frameworks that claim portability but still depend on provider-specific runtimes
+- Local development environments that do not match production behavior
+- Costly rewrites when migrating between providers
 
 Sky addresses this problem at the **architectural level**.
 
 > Your application should not know where it runs.
 > The runtime should adapt to your application — not the other way around.
 
----
+## Core behavior (what happens under the hood)
 
-## Core Principles
+### Request lifecycle
 
-### 1. Serverless-First by Design
+1. Adapter converts provider request into `SkyRequest`
+2. Context is created (provider + requestId + services + meta)
+3. `onRequest` hooks run (in order)
+4. Route handler runs
+5. `onResponse` hooks run (in order)
+6. If any error occurs, `onError` hooks run
 
-Sky is not a traditional web framework adapted to serverless.
+### Error handling and environment
 
-It is designed from the ground up for:
+- Unhandled errors become `500`
+- In non-production environments, error details are included in the response
+- `environment` is set via `new App({ environment })` or `NODE_ENV`
 
-* Event-driven HTTP execution
-* Stateless request handling
-* Explicit initialization
-* Short-lived runtimes
-* Predictable lifecycle hooks
+### Request and response normalization
 
-There is no Express, no Fastify, and no hidden globals.
+Request parsing (by adapters):
 
----
+- `application/json` -> object
+- `application/x-www-form-urlencoded` -> object
+- `text/*` -> string
+- Other content-types -> Buffer/Uint8Array
 
-### 2. Provider-Agnostic Architecture
+Response defaults:
+
+- If you return a primitive or object, it becomes `{ statusCode: 200, body }`
+- If no `content-type` is set and body is an object, JSON is used
+- Buffer/Uint8Array and string are sent as-is
+
+### Provider-Agnostic Architecture
 
 Your application code is written against a **portable HTTP core**.
 
@@ -60,113 +70,69 @@ Cloud providers are integrated through **adapters**, which live entirely outside
 └───────┬────────┘
         │
 ┌───────▼────────────────┐
-│   Provider Adapter      │   ← AWS / GCP / Local / etc.
+│   Provider Adapter     │   ← AWS / GCP / Local / etc.
 └────────────────────────┘
 ```
 
-Switching providers does **not** require rewriting your application — only changing the adapter.
+## Request IDs and tracing
 
----
+- `x-request-id` is honored when provided (sanitized)
+- GCP adapter uses `X-Cloud-Trace-Context` when present
+- Generated IDs follow: `req-<time>-<random>`
 
-### 3. Explicit Boundaries
+Use `ctx.requestId` to correlate logs across services.
 
-Sky enforces clear separation between:
+## Requirements
 
-* **Application logic**
-* **HTTP/runtime mechanics**
-* **Infrastructure and deployment**
+- Node.js 20+
+- npm 10+
 
-This separation is reflected in:
-
-* Project structure
-* Build configuration
-* Provider entrypoints
-
----
-
-## What Sky Is (and Is Not)
-
-### Sky Is
-
-* A serverless-first HTTP framework
-* A portability layer for cloud functions
-* A plugin-driven runtime
-* A CLI-driven development workflow
-
-### Sky Is Not
-
-* A replacement for cloud providers
-* A magic abstraction over provider limitations
-* A full PaaS
-* A framework that hides infrastructure complexity
-
-Sky gives you **control and freedom**, not illusions.
-
----
-
-## Sky CLI
-
-The Sky CLI orchestrates the development lifecycle while keeping your code provider-agnostic.
-
-### Usage
+## Quickstart (CLI)
 
 ```bash
-sky <command> [options]
+sky new my-api --provider=local,gcp --db=mysql --cache=redis
+cd my-api
+npm install
+npm run dev
 ```
 
-### Commands
+This generates a project with:
 
-| Command                   | Description                      |
-| ------------------------- | -------------------------------- |
-| `sky new <name>`          | Scaffold a new Sky application   |
-| `sky plugin new <name>`   | Scaffold a Sky plugin            |
-| `sky dev [--watch]`       | Run the local development server |
-| `sky build [--provider]`  | Build a provider artifact        |
-| `sky deploy [--provider]` | Package a deploy artifact        |
+- `src/app.ts` (your routes and plugins)
+- `src/providers/*.ts` (provider entrypoints)
+- `sky.config.json` (dev/build/deploy config)
+- `package.json` scripts (`dev`, `build`, `deploy`)
 
-### Global Options
+## Project layout (scaffolded)
 
-| Option          | Description      |
-| --------------- | ---------------- |
-| `-h, --help`    | Show help        |
-| `-v, --version` | Show CLI version |
-
----
-
-## Project Structure
-
-A project created with `sky new` looks like this:
-
-```txt
-.
-├── src/
-│   ├── app.ts
-│   └── providers/
-│       └── local.ts
-├── sky.config.json
-├── tsconfig.json
-├── package.json
-├── README.md
-└── .gitignore
+```
+my-api/
+  src/
+    app.ts
+    providers/
+      local.ts
+      gcp.ts
+  sky.config.json
+  package.json
+  tsconfig.json
 ```
 
-This structure is intentional:
+## App entry (`src/app.ts`)
 
-* `app.ts` contains **pure application logic**
-* `providers/*` contain **runtime-specific adapters**
-* `sky.config.json` describes how the CLI builds and runs the project
-
----
-
-## Application Core
-
-### `src/app.ts`
+The scaffold exports a `createApp()` factory. It is the default shape expected by `sky dev`.
 
 ```ts
 import { App, httpOk } from "sky-serverless";
+import { mysqlPlugin, redisPlugin, cachePlugin } from "sky-serverless";
 
 export function createApp(): App {
-  const app = new App({});
+  const app = new App({
+    plugins: [
+      mysqlPlugin({ connectionString: process.env.SKY_MYSQL_URI }),
+      redisPlugin({ connectionString: process.env.SKY_REDIS_URI }),
+      cachePlugin({ keyPrefix: "sky-cache" }),
+    ],
+  });
 
   app.get("/hello", () => {
     return httpOk({ message: "Hello from Sky" });
@@ -178,30 +144,20 @@ export function createApp(): App {
 }
 ```
 
-Key characteristics:
+## Provider entrypoints (`src/providers/*.ts`)
 
-* No dependency on Node, Express, or cloud APIs
-* Routes return typed HTTP responses
-* Plugins and services are injected explicitly
-
----
-
-## Local Provider (Development)
-
-### `src/providers/local.ts`
+### Local (Node HTTP)
 
 ```ts
 import {
   createHttpHandler,
   createNodeHttpAdapter,
-  startNodeHttpServer
+  startNodeHttpServer,
 } from "sky-serverless";
-
 import { createApp } from "../app";
 
 const app = createApp();
 const adapter = createNodeHttpAdapter({ providerName: "local-dev" });
-
 export const handler = createHttpHandler(adapter, app);
 
 export function start() {
@@ -214,117 +170,247 @@ if (require.main === module) {
 }
 ```
 
-This provider:
+### OpenShift (developing)
 
-* Adapts Sky to Node’s HTTP runtime
-* Exists **only for local development**
-* Is not a cloud provider implementation
+```ts
+import { createHttpHandler, OpenShiftProviderAdapter } from "sky-serverless";
+import { createApp } from "../app";
 
----
-
-## Development Workflow
-
-```bash
-npm run dev
+const adapter = new OpenShiftProviderAdapter();
+const app = createApp();
+export const handler = createHttpHandler(adapter, app);
+export default handler;
 ```
 
-* Runs a local HTTP server
-* Supports watch mode
-* Mimics serverless execution semantics as closely as possible
+### GCP
 
----
+```ts
+import { startNodeHttpServer } from "sky-serverless";
+import { createApp } from "../app";
 
-## Build and Deploy (Current State)
+const app = createApp();
+const port = Number(process.env.PORT) || 8080;
+startNodeHttpServer(app, { port });
+```
+
+## sky.config.json
+
+```json
+{
+  "name": "my-api",
+  "appEntry": "./src/app.ts",
+  "defaultProvider": "local",
+  "providers": {
+    "local": { "entry": "./src/providers/local.ts" },
+    "gcp": { "entry": "./src/providers/gcp.ts" }
+  },
+  "dev": { "port": 3000, "watchPaths": ["src"] },
+  "build": { "outDir": "dist", "tsconfig": "tsconfig.json" },
+  "deploy": { "artifactDir": "deploy" }
+}
+```
+
+## CLI commands (scaffold-first)
 
 ```bash
+sky new <name> [--db=mysql] [--cache=redis] [--provider=local,gcp,openshift]
+sky dev [--entry=src/app.ts] [--watch] [--port=3000]
+sky build [--provider=gcp] [--outDir=dist]
+sky deploy [--provider=gcp]
+sky remove [--provider=gcp]
+```
+
+Notes:
+
+- `sky dev` expects `createApp()` in `appEntry`.
+- `sky build` compiles the selected provider entry.
+- `sky deploy` packs the local framework (npm pack) and creates a deploy artifact.
+
+## Native plugins (same pattern as scaffold)
+
+### mysqlPlugin
+
+```ts
+import { mysqlPlugin, MysqlClient } from "sky-serverless";
+
+const app = new App({
+  plugins: [mysqlPlugin({ connectionString: process.env.SKY_MYSQL_URI })],
+});
+
+app.get("/db/ping", async (_req, ctx) => {
+  const mysql = ctx.services.mysql as MysqlClient;
+  const rows = await mysql.query<{ result: number }>("select 1 + 1 as result");
+  return { result: rows[0]?.result ?? 0 };
+});
+```
+
+Options:
+
+- `connectionString` or `uri` (example: `mysql://user:pass@host:3306/db`)
+- `connection` (mysql2/promise config)
+- `envKey` (default `SKY_MYSQL_URI`)
+- `serviceKey` to change `ctx.services.mysql`
+
+### mssqlPlugin
+
+```ts
+import { mssqlPlugin, MssqlClient } from "sky-serverless";
+
+const app = new App({
+  plugins: [mssqlPlugin({ connectionString: process.env.SKY_MSSQL_CONN_STR })],
+});
+
+app.get("/orders", async (_req, ctx) => {
+  const mssql = ctx.services.mssql as MssqlClient;
+  return mssql.query("SELECT * FROM orders WHERE status = @status", {
+    status: "open",
+  });
+});
+```
+
+Options:
+
+- `connectionString` or `uri`
+- `config` (mssql connection config)
+- `envKey` (default `SKY_MSSQL_CONN_STR`)
+- parameters can be `{ value, type }` for SQL Server types
+
+### redisPlugin + cachePlugin
+
+```ts
+import { redisPlugin, cachePlugin, CacheHelper } from "sky-serverless";
+
+const app = new App({
+  plugins: [
+    redisPlugin({ connectionString: process.env.SKY_REDIS_URI }),
+    cachePlugin({ keyPrefix: "sky-cache", defaultTtlSeconds: 30 }),
+  ],
+});
+
+app.get("/cache/ping", async (_req, ctx) => {
+  const cache = ctx.services.cache as CacheHelper;
+  await cache.set("ping", Date.now(), 5);
+  return { cachedAt: await cache.get<number>("ping") };
+});
+```
+
+## Docs and auth plugins (scaffold-compatible)
+
+### swaggerPlugin
+
+```ts
+import { swaggerPlugin } from "sky-serverless";
+
+const app = new App({
+  plugins: [
+    swaggerPlugin({
+      info: { title: "My API", version: "1.0.0" },
+      jsonPath: "/docs.json",
+      uiPath: "/docs",
+    }),
+  ],
+});
+```
+
+### authPlugin
+
+```ts
+import { authPlugin, AuthHelpers, AuthUser } from "sky-serverless";
+
+const app = new App({
+  plugins: [
+    authPlugin({
+      config: {
+        jwtSecret: process.env.SKY_AUTH_JWT_SECRET!,
+        accessTokenTtlSeconds: 900,
+        refreshTokenTtlSeconds: 604800,
+      },
+      async resolveUser(payload) {
+        return userRepo.findById(payload.sub) as Promise<AuthUser | null>;
+      },
+    }),
+  ],
+});
+
+app.post("/login", async (req, ctx) => {
+  const user = await userRepo.verify(req.body.email, req.body.password);
+  if (!user)
+    return { statusCode: 401, body: { message: "Invalid credentials" } };
+  const auth = ctx.services.auth as AuthHelpers;
+  return { tokens: auth.issueTokens(user) };
+});
+```
+
+## Provider adapter contract (for custom providers)
+
+If you want to implement your own provider, follow this contract:
+
+```ts
+import { ProviderAdapter } from "sky-serverless";
+
+export const myAdapter: ProviderAdapter<MyReq, MyRes> = {
+  providerName: "my-provider",
+  async toSkyRequest(rawReq) {
+    return {
+      method: "GET",
+      path: "/",
+      headers: {},
+    };
+  },
+  async fromSkyResponse(res, rawReq, rawRes) {
+    // Write status, headers, body to rawRes
+  },
+  async createContext(rawReq, rawRes) {
+    return {
+      requestId: "custom-id",
+      provider: "my-provider",
+      services: {},
+    };
+  },
+};
+```
+
+## CLI deploy/remove details
+
+### Deploy
+
+`sky deploy`:
+
+- builds the provider entry
+- packs the local framework (`npm pack`)
+- generates a deploy artifact with `package.json` + `manifest.json`
+- for GCP, writes a Dockerfile and deploys with `gcloud`
+
+### Remove
+
+`sky remove --provider=gcp` deletes the Cloud Run service created by deploy.
+
+## Creating custom plugins (via CLI)
+
+```bash
+sky plugin new my-plugin
+cd my-plugin
+npm install
 npm run build
-npm run deploy
 ```
 
-### Important Note (v0.1.1)
+Then install it in your app and register in `App`:
 
-At this stage:
+```ts
+import { App } from "sky-serverless";
+import { createMyPlugin } from "@sky/my-plugin";
 
-* ✅ Projects run **locally only**
-* ❌ No real cloud provider integrations yet
-* ❌ `deploy` does **not** deploy to AWS/GCP/Azure
-* ✅ `deploy` only packages artifacts
+const app = new App({
+  plugins: [createMyPlugin()],
+});
+```
 
-This is intentional.
-Sky stabilizes **contracts before integrations**.
+## Operational gaps and tips
 
----
-
-## sky-serverless Runtime
-
-Sky applications run on top of `sky-serverless`, which provides:
-
-* Core HTTP primitives (`App`, routing, context)
-* Plugin lifecycle hooks
-* Data plugins (MySQL, MSSQL, Redis, Cache)
-* Documentation (Swagger) and Auth (JWT) plugins
-* Multiple adapters (Node HTTP today, cloud in progress)
-
-The runtime is framework-agnostic and fully typed.
-
----
-
-## Vendor Lock-in: The Real Problem
-
-Most serverless projects fail portability not because of business logic, but because:
-
-* Handlers are written against provider APIs
-* Middleware relies on proprietary request objects
-* Frameworks leak infrastructure details
-* Tests depend on cloud runtimes
-
-Sky eliminates this by design.
-
-Your application never imports:
-
-* `aws-lambda`
-* `@google-cloud/functions-framework`
-* Provider SDKs
-
-Those belong in adapters — not in your app.
-
----
-
-## Current Limitations
-
-Sky v0.1.1 intentionally has constraints:
-
-* No production cloud providers yet
-* No multi-provider deploys
-* No bundled artifacts per provider
-* No hot reload outside local Node
-
-These are roadmap items, not oversights.
-
----
-
-## When Sky Makes Sense
-
-Sky is a strong choice if:
-
-* You want to start serverless without committing to a provider
-* You care about long-term portability
-* You want realistic local development
-* You plan to evolve infrastructure over time
-* You value explicit architecture
-
----
-
-## In One Sentence
-
-> **Sky is a serverless-first framework that prevents cloud vendor lock-in by cleanly separating application logic from runtime and provider infrastructure.**
-
----
-
-## Roadmap Direction (High Level)
-
-* Define and stabilize the provider contract
-* Implement the first production cloud provider
-* Produce self-contained build artifacts
-* Enable multi-provider targets from a single codebase
-* Reach v1.0 with stable APIs
+- Native plugins require optional deps (`mysql2`, `mssql`, `ioredis`).
+- `cachePlugin` depends on Redis (from `redisPlugin` or a custom client).
+- Default body limit is 1 MiB in Node, OpenShift, and GCP.
+- Use `trustProxy` behind a load balancer to get real client IP in `ctx.meta.ip`.
+- `sky dev` requires `ts-node` in your project.
+- Adapters enforce `maxBodySizeBytes` (default 1 MiB). Payloads above that return `413`.
+- Use `trustProxy` with `allowCidrs` when behind load balancers to avoid spoofed IPs.

@@ -33,6 +33,6 @@ export interface SkyProjectConfig {
 export interface BuildResult {
   provider: string;
   outDir: string;
-  serverFile: string;
+  entrypointJs: string;
   manifestDir: string;
 }

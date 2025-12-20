@@ -4,7 +4,7 @@ import { PassThrough, Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SkyResponse } from "../src/core/http";
 import { OpenShiftProviderAdapter } from "../src/providers/openshift/openShiftProviderAdapter";
-import { BodySizeLimitError } from "../src/providers/request-utils";
+import { PayloadTooLargeError } from "../src/core/http";
 import * as requestUtils from "../src/providers/request-utils";
 
 function createIncomingMessage(
@@ -123,7 +123,7 @@ describe("OpenShiftProviderAdapter", () => {
   });
 
   it("não sobrescreve headers existentes e monta contexto com IP/protocolo", async () => {
-    const adapter = new OpenShiftProviderAdapter({ logger: () => {} });
+    const adapter = new OpenShiftProviderAdapter({ logger: () => {}, trustProxy: true });
     const request = createIncomingMessage(["name=sky"], {
       "content-type": "application/x-www-form-urlencoded",
     });
@@ -151,6 +151,23 @@ describe("OpenShiftProviderAdapter", () => {
     });
   });
 
+  it("usa x-request-id fornecido pelo cliente no contexto", async () => {
+    const adapter = new OpenShiftProviderAdapter({ logger: () => {} });
+    const request = createIncomingMessage([], { "x-request-id": "ctx-custom" });
+
+    const context = await adapter.createContext(request);
+    expect(context.requestId).toBe("ctx-custom");
+  });
+
+  it("gera requestId quando x-request-id não é fornecido", async () => {
+    const adapter = new OpenShiftProviderAdapter({ logger: () => {} });
+    const request = createIncomingMessage(["{}"]);
+    delete request.headers["x-request-id"];
+
+    const context = await adapter.createContext(request);
+    expect(context.requestId).toMatch(/^req-/);
+  });
+
   it("aplica limite de tamanho do corpo e emite erro", async () => {
     const adapter = new OpenShiftProviderAdapter({
       maxBodySizeBytes: 4,
@@ -159,7 +176,7 @@ describe("OpenShiftProviderAdapter", () => {
     const request = createIncomingMessage(["0123456789"]);
 
     await expect(adapter.toSkyRequest(request)).rejects.toBeInstanceOf(
-      BodySizeLimitError,
+      PayloadTooLargeError,
     );
   });
 
@@ -181,6 +198,28 @@ describe("OpenShiftProviderAdapter", () => {
 
     expect(Buffer.concat(chunks).toString()).toBe("hello");
     expect(response.getHeaders()["content-type"]).toBeUndefined();
+  });
+
+  it("filtra headers hop-by-hop ao enviar resposta", async () => {
+    const adapter = new OpenShiftProviderAdapter({ logger: () => {} });
+    const request = createIncomingMessage([]);
+    const response = createServerResponse();
+
+    await adapter.fromSkyResponse(
+      {
+        statusCode: 200,
+        body: "ok",
+        headers: {
+          connection: "keep-alive",
+          "x-safe": "value",
+        },
+      },
+      request,
+      response,
+    );
+
+    expect(response.getHeaders()).toMatchObject({ "x-safe": "value" });
+    expect(response.getHeaders()).not.toHaveProperty("connection");
   });
 
   it("ignora respostas quando headers já foram enviados", async () => {
@@ -321,7 +360,7 @@ describe("OpenShiftProviderAdapter", () => {
   });
 
   it("reutiliza headers normalizados ao criar contexto depois de toSkyRequest", async () => {
-    const adapter = new OpenShiftProviderAdapter({ logger: () => {} });
+    const adapter = new OpenShiftProviderAdapter({ logger: () => {}, trustProxy: true });
     const request = createIncomingMessage([]);
     request.headers["x-forwarded-for"] = ["10.1.0.5", "10.1.0.6"];
     await adapter.toSkyRequest(request);

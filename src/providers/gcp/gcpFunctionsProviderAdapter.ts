@@ -1,12 +1,14 @@
 import type { IncomingHttpHeaders } from "node:http";
+import { Readable } from "stream";
 import { SkyContext } from "../../core/context";
-import { SkyHeaders, SkyRequest, SkyResponse } from "../../core/http";
+import { HOP_BY_HOP_HEADERS, PayloadTooLargeError, SkyHeaders, SkyRequest, SkyResponse } from "../../core/http";
 import { normalizeHeaders, parseBody, parseQueryString } from "../../core/http/parsers";
 import {
   ProviderAdapter,
   generateRequestId,
+  sanitizeRequestId,
 } from "../../core/provider-adapter";
-import { readIncomingMessage } from "../request-utils";
+import { getClientIp, readIncomingMessage, TrustProxyConfig } from "../request-utils";
 
 type HeaderValue = string | number | readonly string[];
 type HeaderMap = Record<string, HeaderValue>;
@@ -14,7 +16,7 @@ type HeaderMap = Record<string, HeaderValue>;
 export interface GcpRequest<
   TBody = unknown,
   TQuery extends Record<string, unknown> = Record<string, unknown>,
-> extends NodeJS.ReadableStream {
+> extends Readable {
   method?: string;
   path?: string;
   url?: string;
@@ -33,14 +35,20 @@ export interface GcpResponse {
 }
 
 export interface GcpFunctionsProviderAdapterOptions {
+  maxBodySizeBytes?: number;
+  trustProxy?: TrustProxyConfig;
   logger?: (message: string, details?: Record<string, unknown>) => void;
 }
+
+const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 
 export class GcpFunctionsProviderAdapter
   implements ProviderAdapter<GcpRequest, GcpResponse>
 {
   readonly providerName = "gcp";
   private readonly logger: (message: string, details?: Record<string, unknown>) => void;
+  private readonly maxBodySizeBytes: number;
+  private readonly trustProxy?: TrustProxyConfig;
 
   constructor(options: GcpFunctionsProviderAdapterOptions = {}) {
     this.logger =
@@ -52,6 +60,8 @@ export class GcpFunctionsProviderAdapter
           console.error(message);
         }
       });
+    this.maxBodySizeBytes = options.maxBodySizeBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+    this.trustProxy = options.trustProxy ?? true;
   }
 
   async toSkyRequest(rawReq: GcpRequest): Promise<SkyRequest> {
@@ -60,7 +70,7 @@ export class GcpFunctionsProviderAdapter
     const requestUrl = rawReq.path ?? rawReq.url ?? "/";
     const url = new URL(requestUrl, `http://${host}`);
 
-    const rawBody = await this.resolveRawBody(rawReq);
+    const rawBody = await this.resolveRawBody(rawReq, headers);
     let body = rawReq.body;
     if (body === undefined && rawBody) {
       const contentType = this.getHeader(headers, "content-type");
@@ -100,6 +110,9 @@ export class GcpFunctionsProviderAdapter
         if (value === undefined) {
           continue;
         }
+        if (HOP_BY_HOP_HEADERS.includes(key.toLowerCase())) {
+          continue;
+        }
         response = response.set(key, value as HeaderValue);
         if (key.toLowerCase() === "content-type") {
           hasContentType = true;
@@ -124,6 +137,7 @@ export class GcpFunctionsProviderAdapter
     rawReq: GcpRequest,
   ): Promise<SkyContext> {
     const headers = this.normalizeHeaders(rawReq.headers);
+    const ip = getClientIp(rawReq.headers, this.trustProxy);
     return {
       requestId: this.getRequestId(rawReq, headers),
       provider: this.providerName,
@@ -134,6 +148,7 @@ export class GcpFunctionsProviderAdapter
         traceContext: this.getHeader(headers, "x-cloud-trace-context"),
         host: this.getHeader(headers, "host"),
         userAgent: this.getHeader(headers, "user-agent"),
+        ip,
       },
     };
   }
@@ -183,25 +198,45 @@ export class GcpFunctionsProviderAdapter
     return undefined;
   }
 
-  private async resolveRawBody(rawReq: GcpRequest): Promise<Buffer | undefined> {
+  private async resolveRawBody(rawReq: GcpRequest, headers: SkyHeaders): Promise<Buffer | undefined> {
+    const checkSize = (buf: Buffer) => {
+      if (Number.isFinite(this.maxBodySizeBytes) && buf.length > this.maxBodySizeBytes) {
+        throw new PayloadTooLargeError('Request body too large', this.maxBodySizeBytes);
+      }
+    };
+
     if (Buffer.isBuffer(rawReq.rawBody)) {
+      checkSize(rawReq.rawBody);
       return rawReq.rawBody;
     }
     if (typeof rawReq.rawBody === "string") {
-      return Buffer.from(rawReq.rawBody);
+      const buffer = Buffer.from(rawReq.rawBody);
+      checkSize(buffer);
+      return buffer;
     }
     if (typeof rawReq.body === "string") {
-      return Buffer.from(rawReq.body);
+      const buffer = Buffer.from(rawReq.body);
+      checkSize(buffer);
+      return buffer;
     }
     if (rawReq.body && typeof rawReq.body === "object") {
-      try {
-        return Buffer.from(JSON.stringify(rawReq.body));
-      } catch (error) {
-        this.log("Failed to serialize request body", { error });
+      const contentType = this.getHeader(headers, "content-type");
+      if (this.isJsonContentType(contentType)) {
+        try {
+          const json = JSON.stringify(rawReq.body);
+          const buffer = Buffer.from(json);
+          checkSize(buffer);
+          return buffer;
+        } catch (error) {
+          this.log("Failed to serialize request body", { error });
+        }
       }
     }
 
-    const buffer = await readIncomingMessage(rawReq);
+    if (!this.shouldStreamBody(rawReq)) {
+      return undefined;
+    }
+    const buffer = await readIncomingMessage(rawReq, { maxBytes: this.maxBodySizeBytes });
     return buffer.length ? buffer : undefined;
   }
 
@@ -232,10 +267,46 @@ export class GcpFunctionsProviderAdapter
     const traceHeader =
       rawReq.get?.("X-Cloud-Trace-Context") ??
       this.getHeader(headers, "x-cloud-trace-context");
-    return traceHeader ?? generateRequestId();
+
+    if (traceHeader) {
+      const [traceId] = traceHeader.split('/');
+      return sanitizeRequestId(traceId);
+    }
+
+    return generateRequestId();
   }
 
   private log(message: string, details?: Record<string, unknown>): void {
     this.logger(message, details);
+  }
+
+  private shouldStreamBody(rawReq: GcpRequest): boolean {
+    const method = (rawReq.method ?? "GET").toUpperCase();
+    const transferEncoding = rawReq.headers["transfer-encoding"];
+    const hasTransferEncoding = Array.isArray(transferEncoding)
+      ? transferEncoding.some(Boolean)
+      : Boolean(transferEncoding);
+    const contentLengthHeader = rawReq.headers["content-length"];
+    const contentLength = Array.isArray(contentLengthHeader)
+      ? contentLengthHeader[0]
+      : contentLengthHeader;
+
+    if ((method === "GET" || method === "HEAD") && !hasTransferEncoding) {
+      if (!contentLength || Number(contentLength) === 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private isJsonContentType(contentType?: string): boolean {
+    if (!contentType) {
+      return false;
+    }
+    const normalized = contentType.split(";")[0]?.trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+    return normalized === "application/json" || normalized.endsWith("+json");
   }
 }

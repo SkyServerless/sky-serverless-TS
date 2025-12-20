@@ -54,6 +54,25 @@ export const SKY_HTTP_METHODS: readonly SkyHttpMethod[] = [
   "CONNECT",
 ] as const;
 
+export const HOP_BY_HOP_HEADERS: readonly string[] = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+] as const;
+
 export function isSkyHttpMethod(value: string): value is SkyHttpMethod {
   return SKY_HTTP_METHODS.includes(value as SkyHttpMethod);
+}
+
+export class PayloadTooLargeError extends Error {
+  public readonly code = "payload_too_large";
+  constructor(message: string, public limitBytes: number) {
+    super(message);
+    this.name = "PayloadTooLargeError";
+  }
 }

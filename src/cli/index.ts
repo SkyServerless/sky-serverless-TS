@@ -5,6 +5,7 @@ import { handleDevCommand } from "./commands/dev";
 import { handleBuildCommand } from "./commands/build";
 import { handleDeployCommand } from "./commands/deploy";
 import { handlePluginCommand } from "./commands/plugin";
+import { handleRemoveCommand } from "./commands/remove";
 
 export const CLI_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
 export const ROOT_DEP_VERSIONS = extractDependencyVersions();
@@ -38,6 +39,9 @@ async function run(): Promise<void> {
     case "deploy":
       await handleDeployCommand(rest);
       break;
+    case "remove":
+      await handleRemoveCommand(rest);
+      break;
     default:
       logError(`Unknown command "${command}".`);
       printGlobalHelp();
@@ -63,6 +67,7 @@ Commands:
   dev [--watch]          Run local dev server
   build [--provider]     Build provider artifact
   deploy [--provider]    Build and package deploy artifact
+  remove [--provider]    Delete a deployed service
 
 Options:
   -h, --help             Show this help

@@ -2,7 +2,7 @@ import { createHmac, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { App } from "../src/core/app";
 import { SkyContext } from "../src/core/context";
-import { SkyRequest } from "../src/core/http";
+import { SkyRequest, SkyResponse } from "../src/core/http";
 import { httpOk } from "../src/core/http/responses";
 import { Router } from "../src/core/router";
 import {
@@ -186,6 +186,39 @@ describe("swaggerPlugin", () => {
         }),
       },
     });
+  });
+
+  it("cacheia documento JSON até que novas rotas alterem a versão", () => {
+    const router = new Router();
+    const plugin = swaggerPlugin();
+    plugin.setup?.({ router });
+    router.register("GET", "/ping", () => httpOk({ ok: true }));
+    const docsRoute = router.match("GET", "/docs.json");
+    if (!docsRoute) {
+      throw new Error("Docs route not registered");
+    }
+    const handler = docsRoute.route.handler;
+    const firstResponse = handler({} as SkyRequest, {} as SkyContext) as SkyResponse;
+    const secondResponse = handler({} as SkyRequest, {} as SkyContext) as SkyResponse;
+    expect(secondResponse.body).toBe(firstResponse.body);
+
+    router.register("GET", "/health", () => httpOk({ status: "ok" }));
+    const thirdResponse = handler({} as SkyRequest, {} as SkyContext) as SkyResponse;
+    expect(thirdResponse.body).not.toBe(firstResponse.body);
+  });
+
+  it("cacheia HTML da UI entre requisições", () => {
+    const router = new Router();
+    const plugin = swaggerPlugin();
+    plugin.setup?.({ router });
+    const uiRoute = router.match("GET", "/docs");
+    if (!uiRoute) {
+      throw new Error("UI route not registered");
+    }
+    const handler = uiRoute.route.handler;
+    const firstResponse = handler({} as SkyRequest, {} as SkyContext) as SkyResponse;
+    const secondResponse = handler({} as SkyRequest, {} as SkyContext) as SkyResponse;
+    expect(secondResponse.body).toBe(firstResponse.body);
   });
 
   it("serves Swagger UI bound to the JSON document", async () => {

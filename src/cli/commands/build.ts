@@ -12,7 +12,7 @@ export async function handleBuildCommand(argv: string[]): Promise<void> {
     outDir: options.outDir as string | undefined,
     entryOverride: options.entry as string | undefined,
   });
-  logInfo(`Build complete (${result.provider}). Output: ${result.serverFile}`);
+  logInfo(`Build complete (${result.provider}). Output: ${result.entrypointJs}`);
 }
 
 function printBuildHelp(): void {

@@ -8,16 +8,16 @@ import {
   createNodeHttpAdapter,
   startNodeHttpServer,
 } from "../src/providers/node-http-adapter";
+import * as requestUtils from "../src/providers/request-utils";
 import * as providerAdapter from "../src/core/provider-adapter";
 
 function createMockRequest(bodyChunks: Array<string | Buffer>) {
   const request = new Readable({
-    objectMode: true,
     read() {
       while (bodyChunks.length > 0) {
         const chunk = bodyChunks.shift();
         if (chunk !== undefined) {
-          this.push(chunk);
+          this.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
           return;
         }
       }
@@ -68,7 +68,11 @@ describe("Node HTTP adapter", () => {
       {
         statusCode: 201,
         body: { ok: true },
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-custom-header": "test",
+          connection: "close", // Hop-by-hop header
+        },
       },
       request,
       rawResponse,
@@ -76,6 +80,73 @@ describe("Node HTTP adapter", () => {
 
     expect(rawResponse.statusCode).toBe(201);
     expect(rawResponse.end).toHaveBeenCalledWith(JSON.stringify({ ok: true }));
+    expect(rawResponse.getHeaders()).toMatchObject({
+      "content-type": "application/json",
+      "x-custom-header": "test",
+    });
+    expect(rawResponse.getHeaders()).not.toHaveProperty("connection");
+  });
+
+  it("define content-type JSON por padrão quando o body é um objeto", async () => {
+    const adapter = createNodeHttpAdapter();
+    const request = createMockRequest([]);
+    const rawResponse = createMockResponse();
+
+    await adapter.fromSkyResponse(
+      {
+        statusCode: 200,
+        body: { message: "default" },
+      },
+      request,
+      rawResponse,
+    );
+
+    expect(rawResponse.getHeaders()).toMatchObject({
+      "content-type": "application/json; charset=utf-8",
+    });
+  });
+
+  it("evita ler body em requisições GET sem payload anunciado", async () => {
+    const spy = vi.spyOn(requestUtils, "readIncomingMessage");
+    const adapter = createNodeHttpAdapter();
+    const request = createMockRequest([]);
+    request.method = "GET";
+    delete request.headers["content-length"];
+    delete request.headers["transfer-encoding"];
+
+    const skyRequest = await adapter.toSkyRequest(request);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(skyRequest.body).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  it("lê body em GET quando content-length indica payload", async () => {
+    const spy = vi.spyOn(requestUtils, "readIncomingMessage");
+    const adapter = createNodeHttpAdapter();
+    const request = createMockRequest(['{"value":42}']);
+    request.method = "GET";
+    request.headers["content-length"] = "12";
+
+    const skyRequest = await adapter.toSkyRequest(request);
+
+    expect(spy).toHaveBeenCalled();
+    expect(skyRequest.body).toEqual({ value: 42 });
+    spy.mockRestore();
+  });
+
+  it("usa primeiro valor quando content-length vem como array", async () => {
+    const spy = vi.spyOn(requestUtils, "readIncomingMessage");
+    const adapter = createNodeHttpAdapter();
+    const request = createMockRequest([]);
+    request.method = "GET";
+    request.headers["content-length"] = ["0", "999"] as unknown as string;
+
+    const skyRequest = await adapter.toSkyRequest(request);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(skyRequest.body).toBeUndefined();
+    spy.mockRestore();
   });
 
   it("aplica defaults quando request está incompleto", async () => {
@@ -165,6 +236,25 @@ describe("Node HTTP adapter", () => {
     expect(context.requestId).toMatch(/req-/);
   });
 
+  it("rejeita bodies maiores que o limite padrão", async () => {
+    const adapter = createNodeHttpAdapter();
+    const hugeRequest = createMockRequest([Buffer.alloc(1_048_577)]);
+
+    await expect(adapter.toSkyRequest(hugeRequest)).rejects.toMatchObject({
+      code: "payload_too_large",
+      limitBytes: 1_048_576,
+    });
+  });
+
+  it("não define requestId quando header não está presente", async () => {
+    const adapter = createNodeHttpAdapter();
+    const request = createMockRequest([]);
+    delete request.headers["x-request-id"];
+
+    const skyRequest = await adapter.toSkyRequest(request);
+    expect(skyRequest.requestId).toBeUndefined();
+  });
+
   it("permite sobrescrever o IP via extendContext", async () => {
     const adapter = createNodeHttpAdapter({
       extendContext: () => ({
@@ -204,6 +294,21 @@ describe("Node HTTP adapter", () => {
       createMockResponse(),
     );
     expect(extendedContext.requestId).toBe("extend-id");
+  });
+
+  it("popula meta.ip quando extendContext não o fornece", async () => {
+    const adapter = createNodeHttpAdapter({
+      extendContext: () => ({
+        meta: { userAgent: "test-agent" },
+      }),
+    });
+    const request = createMockRequest([]);
+    if (!adapter.createContext) {
+      throw new Error("Adapter did not expose createContext");
+    }
+    const context = await adapter.createContext(request, createMockResponse());
+    expect(context.meta?.ip).toBe("127.0.0.1");
+    expect(context.meta?.userAgent).toBe("test-agent");
   });
 });
 
@@ -359,5 +464,35 @@ describe("startNodeHttpServer", () => {
       }
       consoleSpy.mockRestore();
     }
+  });
+
+  it("configura timeouts customizados no servidor HTTP", () => {
+    const app = new App();
+    const handler = vi.fn();
+    vi.spyOn(providerAdapter, "createHttpHandler").mockReturnValue(
+      handler as unknown as ReturnType<typeof providerAdapter.createHttpHandler>,
+    );
+
+    const listen = vi.fn((port, host, callback) => {
+      callback?.();
+      return {} as http.Server;
+    });
+    const serverMock = {
+      listen,
+      headersTimeout: 0,
+      requestTimeout: 0,
+      keepAliveTimeout: 0,
+    } as unknown as http.Server;
+    vi.spyOn(http, "createServer").mockReturnValue(serverMock);
+
+    startNodeHttpServer(app, {
+      headersTimeoutMs: 1234,
+      requestTimeoutMs: 5678,
+      keepAliveTimeoutMs: 910,
+    });
+
+    expect(serverMock.headersTimeout).toBe(1234);
+    expect(serverMock.requestTimeout).toBe(5678);
+    expect(serverMock.keepAliveTimeout).toBe(910);
   });
 });

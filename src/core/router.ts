@@ -93,6 +93,7 @@ interface InternalRoute<
 
 export class Router {
   private readonly routes: InternalRoute[] = [];
+  private version = 0;
 
   register(definition: RouteDefinition): this;
   register(
@@ -116,6 +117,7 @@ export class Router {
       definition,
       matchPath: buildRouteMatcher(definition.pathPattern),
     });
+    this.version += 1;
     return this;
   }
 
@@ -140,6 +142,10 @@ export class Router {
 
   getRoutes(): RouteDefinition[] {
     return this.routes.map((route) => route.definition);
+  }
+
+  getVersion(): number {
+    return this.version;
   }
 }
 

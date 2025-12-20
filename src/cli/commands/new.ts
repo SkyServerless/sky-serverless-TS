@@ -20,7 +20,7 @@ export async function handleNewCommand(argv: string[]): Promise<void> {
   const name = toKebabCase(rawName);
   const db = parseDbOption(options.db ?? "none");
   const cache = parseCacheOption(options.cache ?? "none");
-  const provider = parseProviderOption(options.provider ?? "local");
+  const providers = parseProviderOptions(options.provider ?? "local");
   const targetDir = path.resolve(process.cwd(), options.path ? String(options.path) : name);
   const force = toBoolean(options.force);
   const shouldInstall = toBoolean(options.install);
@@ -39,7 +39,7 @@ export async function handleNewCommand(argv: string[]): Promise<void> {
     targetDir,
     db,
     cache,
-    provider,
+    providers,
   });
 
   logInfo(`Project "${name}" created at ${targetDir}`);
@@ -52,12 +52,12 @@ export async function handleNewCommand(argv: string[]): Promise<void> {
 
 
 function printNewHelp(): void {
-  console.log(`Usage: sky new <name> [--db=mysql] [--cache=redis] [--provider=openshift]
+  console.log(`Usage: sky new <name> [--db=mysql] [--cache=redis] [--provider=gcp,openshift]
 
 Options:
   --db <name>            Database plugin (mysql)
   --cache <name>         Cache backend (redis)
-  --provider <name>      Provider adapter (local, openshift, gcp)
+  --provider <names>     Comma-separated list of providers (e.g., local, openshift, gcp)
   --force                Allow writing into non-empty directory
   --install              Run npm install after scaffolding
   --path <dir>           Override target directory
@@ -88,12 +88,17 @@ function parseCacheOption(value: CliOptionValue): CacheOption {
   throw new Error(`Unsupported cache "${value}". Use redis or none.`);
 }
 
-function parseProviderOption(value: CliOptionValue): ProviderOption {
-  const normalized = typeof value === "string" ? value.toLowerCase() : "local";
-  if (normalized === "local" || normalized === "openshift" || normalized === "gcp") {
-    return normalized;
+function parseProviderOptions(value: CliOptionValue): ProviderOption[] {
+  const providers = (typeof value === 'string' ? value : 'local').split(',').map(p => p.trim().toLowerCase());
+  const validProviders: ProviderOption[] = [];
+  for (const p of providers) {
+    if (p === "local" || p === "openshift" || p === "gcp") {
+      validProviders.push(p as ProviderOption);
+    } else {
+      throw new Error(`Unsupported provider "${p}". Use local, openshift, or gcp.`);
+    }
   }
-  throw new Error(`Unsupported provider "${value}". Use local, openshift, or gcp.`);
+  return [...new Set(validProviders)];
 }
 
 async function scaffoldProject(options: {
@@ -101,12 +106,12 @@ async function scaffoldProject(options: {
   targetDir: string;
   db: DbOption;
   cache: CacheOption;
-  provider: ProviderOption;
+  providers: ProviderOption[];
 }): Promise<void> {
   const projectFiles: Array<{ relativePath: string; contents: string }> = [];
   projectFiles.push({
     relativePath: "package.json",
-    contents: createProjectPackageJson(options.name, options.provider),
+    contents: createProjectPackageJson(options.name, options.providers),
   });
   projectFiles.push({
     relativePath: "tsconfig.json",
@@ -114,7 +119,7 @@ async function scaffoldProject(options: {
   });
   projectFiles.push({
     relativePath: "sky.config.json",
-    contents: createSkyConfig(options.name, options.provider),
+    contents: createSkyConfig(options.name, options.providers),
   });
   projectFiles.push({
     relativePath: ".gitignore",
@@ -129,20 +134,11 @@ async function scaffoldProject(options: {
     contents: createAppSource(options.db, options.cache),
   });
 
-  projectFiles.push({
-    relativePath: "src/providers/local.ts",
-    contents: createProviderEntrySource("local"),
-  });
-  if (options.provider === "openshift") {
+  const allProviders = new Set(["local", ...options.providers]);
+  for (const provider of allProviders) {
     projectFiles.push({
-      relativePath: "src/providers/openshift.ts",
-      contents: createProviderEntrySource("openshift"),
-    });
-  }
-  if (options.provider === "gcp") {
-    projectFiles.push({
-      relativePath: "src/providers/gcp.ts",
-      contents: createProviderEntrySource("gcp"),
+      relativePath: `src/providers/${provider}.ts`,
+      contents: createProviderEntrySource(provider as ProviderOption),
     });
   }
 
@@ -153,19 +149,29 @@ async function scaffoldProject(options: {
 }
 
 
-function createProjectPackageJson(name: string, provider: ProviderOption): string {
+function createProjectPackageJson(name: string, providers: ProviderOption[]): string {
   const sanitizedName = toKebabCase(name);
-  const defaultProvider = provider;
+  const defaultProvider = providers[0] ?? 'local';
+  
+  const deployScripts: Record<string, string> = {};
+  for (const provider of providers) {
+    if(provider !== 'local') {
+      deployScripts[`deploy:${provider}`] = `sky deploy --provider=${provider}`;
+    }
+  }
+
   return JSON.stringify(
     {
       name: sanitizedName,
       version: "0.1.0",
       private: true,
       type: "commonjs",
+      main: "dist/server.js",
       scripts: {
         dev: "sky dev --watch",
         build: "sky build",
         deploy: `sky deploy --provider=${defaultProvider}`,
+        ...deployScripts
       },
       dependencies: {
         "sky-serverless": `^${CLI_VERSION}`,
@@ -198,22 +204,21 @@ function createProjectTsconfig(): string {
 `;
 }
 
-function createSkyConfig(projectName: string, provider: ProviderOption): string {
-  const providers: Record<string, { entry: string }> = {
+function createSkyConfig(projectName: string, providers: ProviderOption[]): string {
+  const providerConfigs: Record<string, { entry: string }> = {
     local: { entry: "./src/providers/local.ts" },
   };
-  if (provider === "openshift") {
-    providers.openshift = { entry: "./src/providers/openshift.ts" };
+
+  for (const provider of providers) {
+    providerConfigs[provider] = { entry: `./src/providers/${provider}.ts` };
   }
-  if (provider === "gcp") {
-    providers.gcp = { entry: "./src/providers/gcp.ts" };
-  }
+
   return JSON.stringify(
     {
       name: projectName,
       appEntry: "./src/app.ts",
-      defaultProvider: provider,
-      providers,
+      defaultProvider: providers[0] ?? 'local',
+      providers: providerConfigs,
       dev: {
         port: 3000,
         watchPaths: ["src"],
@@ -223,7 +228,7 @@ function createSkyConfig(projectName: string, provider: ProviderOption): string 
         tsconfig: "tsconfig.json",
       },
       deploy: {
-        artifactDir: "dist/deploy",
+        artifactDir: "deploy",
       },
     },
     null,
@@ -328,15 +333,19 @@ export default handler;
 `;
   }
 
-  return `import { createHttpHandler, GcpFunctionsProviderAdapter } from "sky-serverless";
+  // gcp
+  return `import { startNodeHttpServer } from "sky-serverless";
 import { createApp } from "../app";
 
-const adapter = new GcpFunctionsProviderAdapter();
 const app = createApp();
-export const handler = createHttpHandler(adapter, app);
-export default handler;
+
+// Cloud Run provides the port to listen on via the PORT env var.
+// The startNodeHttpServer function will handle creating the necessary
+// Node.js adapter and starting the server.
+const port = Number(process.env.PORT) || 8080;
+startNodeHttpServer(app, { port });
 `;
-}
+  }
 
 function createProjectReadme(name: string): string {
   return `# ${name}

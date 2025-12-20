@@ -29,37 +29,55 @@ export function swaggerPlugin(options: SwaggerPluginOptions = {}): SkyPlugin {
   const uiPath = options.uiPath ?? "/docs";
   const htmlTitle = options.uiTitle ?? "SkyServerless Docs";
   const openapiVersion = options.openapi ?? "3.1.0";
+  let cachedDocument: SwaggerDocument | undefined;
+  let cachedRouterVersion = -1;
+  let cachedHtml: string | undefined;
 
   return {
     name: "@sky/swagger",
     version: "0.1.0",
     setup({ router }) {
+      const getDocument = () => {
+        const version = router.getVersion();
+        if (!cachedDocument || cachedRouterVersion !== version) {
+          cachedDocument = buildOpenApiDocument(router, {
+            openapi: openapiVersion,
+            info: options.info,
+            servers: options.servers,
+            tags: options.tags,
+            components: options.components,
+            includeDocsEndpoints: options.includeDocsEndpoints ?? false,
+            security: options.security,
+            jsonPath,
+            uiPath,
+          });
+          cachedRouterVersion = version;
+        }
+        return cachedDocument;
+      };
+      const getHtml = () => {
+        if (!cachedHtml) {
+          cachedHtml = renderSwaggerUi({
+            title: htmlTitle,
+            documentUrl: jsonPath,
+          });
+        }
+        return cachedHtml;
+      };
+
       router.register("GET", jsonPath, () => ({
         statusCode: 200,
         headers: {
           "content-type": "application/json",
         },
-        body: buildOpenApiDocument(router, {
-          openapi: openapiVersion,
-          info: options.info,
-          servers: options.servers,
-          tags: options.tags,
-          components: options.components,
-          includeDocsEndpoints: options.includeDocsEndpoints ?? false,
-          security: options.security,
-          jsonPath,
-          uiPath,
-        }),
+        body: getDocument(),
       }));
       router.register("GET", uiPath, () => ({
         statusCode: 200,
         headers: {
           "content-type": "text/html; charset=utf-8",
         },
-        body: renderSwaggerUi({
-          title: htmlTitle,
-          documentUrl: jsonPath,
-        }),
+        body: getHtml(),
       }));
     },
   };

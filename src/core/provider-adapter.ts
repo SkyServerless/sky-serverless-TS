@@ -1,6 +1,6 @@
 import { App } from "./app";
 import { SkyContext } from "./context";
-import { SkyRequest, SkyResponse } from "./http";
+import { PayloadTooLargeError, SkyRequest, SkyResponse } from "./http";
 import { httpError } from "./http/responses";
 
 /**
@@ -45,6 +45,18 @@ export function createHttpHandler<
       const response = await app.handle(skyRequest, context);
       await adapter.fromSkyResponse(response, rawRequest, rawResponse);
     } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        const response = httpError({
+          statusCode: 413,
+          message: error.message,
+          details: {
+            code: error.code,
+            limitBytes: error.limitBytes,
+          },
+        });
+        await adapter.fromSkyResponse(response, rawRequest, rawResponse);
+        return;
+      }
       const fallback = httpError({
         details: serializeError(error),
       });
@@ -70,7 +82,9 @@ async function resolveContext<
   if (provided) {
     provided.provider = adapter.providerName;
     provided.requestId = provided.requestId ?? skyRequest.requestId ?? generateRequestId();
-    provided.services = provided.services ?? {};
+    if (!provided.services) {
+      provided.services = {};
+    }
     return provided;
   }
 
@@ -83,6 +97,11 @@ async function resolveContext<
 
 export function generateRequestId(): string {
   return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function sanitizeRequestId(id: string): string {
+  if (!id) return '';
+  return id.trim().slice(0, 128).replace(/[^a-zA-Z0-9._:-]/g, '_');
 }
 
 function serializeError(error: unknown): Record<string, unknown> {

@@ -1,19 +1,18 @@
 import http from "node:http";
 import { Readable } from "node:stream";
 import { SkyContext } from "../../core/context";
-import { SkyHeaders, SkyRequest, SkyResponse } from "../../core/http";
+import { HOP_BY_HOP_HEADERS, PayloadTooLargeError, SkyHeaders, SkyRequest, SkyResponse } from "../../core/http";
 import { normalizeHeaders, parseBody, parseQueryString } from "../../core/http/parsers";
 import {
   ProviderAdapter,
   generateRequestId,
+  sanitizeRequestId,
 } from "../../core/provider-adapter";
-import {
-  BodySizeLimitError,
-  readIncomingMessage,
-} from "../request-utils";
+import { getClientIp, readIncomingMessage, TrustProxyConfig } from "../request-utils";
 
 export interface OpenShiftProviderAdapterOptions {
   maxBodySizeBytes?: number;
+  trustProxy?: TrustProxyConfig;
   logger?: (message: string, details?: Record<string, unknown>) => void;
 }
 
@@ -24,11 +23,13 @@ export class OpenShiftProviderAdapter
 {
   readonly providerName = "openshift";
   private readonly maxBodySize: number;
+  private readonly trustProxy?: TrustProxyConfig;
   private readonly logger: (message: string, details?: Record<string, unknown>) => void;
   private readonly headerCache = new WeakMap<http.IncomingMessage, SkyHeaders>();
 
   constructor(options: OpenShiftProviderAdapterOptions = {}) {
     this.maxBodySize = options.maxBodySizeBytes ?? DEFAULT_BODY_LIMIT;
+    this.trustProxy = options.trustProxy ?? false;
     this.logger =
       options.logger ??
       ((message, details) => {
@@ -47,6 +48,7 @@ export class OpenShiftProviderAdapter
     const rawBody = await this.readBody(rawReq);
     const contentType = this.getFirstHeaderValue(headers, "content-type");
     const parsedBody = parseBody(rawBody.length ? rawBody : undefined, contentType);
+    const headerRequestId = this.getFirstHeaderValue(headers, "x-request-id");
 
     return {
       method: (rawReq.method ?? "GET").toUpperCase(),
@@ -56,7 +58,7 @@ export class OpenShiftProviderAdapter
       body: parsedBody.body,
       rawBody: rawBody.length ? rawBody : undefined,
       raw: rawReq,
-      requestId: this.getFirstHeaderValue(headers, "x-request-id"),
+      requestId: headerRequestId ? sanitizeRequestId(headerRequestId) : undefined,
     };
   }
 
@@ -84,7 +86,10 @@ export class OpenShiftProviderAdapter
         if (this.hasHeader(rawRes, key)) {
           continue;
         }
-        rawRes.setHeader(key, value);
+        if (HOP_BY_HOP_HEADERS.includes(key.toLowerCase())) {
+          continue;
+        }
+        rawRes.setHeader(key, value as string);
       }
 
       if (
@@ -129,13 +134,14 @@ export class OpenShiftProviderAdapter
     rawReq: http.IncomingMessage,
   ): Promise<SkyContext> {
     const headers = this.getHeaders(rawReq);
+    const headerRequestId = this.getFirstHeaderValue(headers, "x-request-id");
     return {
       requestId:
-        this.getFirstHeaderValue(headers, "x-request-id") ?? generateRequestId(),
+        (headerRequestId ? sanitizeRequestId(headerRequestId) : generateRequestId()),
       provider: this.providerName,
       services: {},
       meta: {
-        ip: this.extractIp(rawReq, headers),
+        ip: getClientIp(rawReq.headers, this.trustProxy, rawReq.socket?.remoteAddress),
         host: this.getFirstHeaderValue(headers, "host"),
         protocol: this.getFirstHeaderValue(headers, "x-forwarded-proto") ?? "http",
         userAgent: this.getFirstHeaderValue(headers, "user-agent"),
@@ -148,13 +154,12 @@ export class OpenShiftProviderAdapter
   private async readBody(rawReq: http.IncomingMessage): Promise<Buffer> {
     try {
       return await readIncomingMessage(rawReq, {
-        maxBodyBytes: this.maxBodySize,
+        maxBytes: this.maxBodySize,
       });
     } catch (error) {
-      if (error instanceof BodySizeLimitError) {
+      if (error instanceof PayloadTooLargeError) {
         this.log("OpenShift request exceeded max body size", {
-          limit: error.limit,
-          size: error.size,
+          limit: error.limitBytes,
         });
       } else {
         this.log("Failed to read OpenShift request body", { error });
@@ -181,14 +186,6 @@ export class OpenShiftProviderAdapter
       return value[0];
     }
     return value;
-  }
-
-  private extractIp(rawReq: http.IncomingMessage, headers: SkyHeaders): string | undefined {
-    const forwarded = this.getFirstHeaderValue(headers, "x-forwarded-for");
-    if (forwarded) {
-      return forwarded.split(",")[0]?.trim();
-    }
-    return rawReq.socket?.remoteAddress ?? undefined;
   }
 
   private hasHeader(rawRes: http.ServerResponse, key: string): boolean {
