@@ -98,7 +98,7 @@ function spawnCommand(command: string, args: string[]) {
     return spawn(command, args, { stdio: "inherit" });
   }
 
-  const cmdArgs = ["/d", "/s", "/c", buildCmdLine(command, args)];
+  const cmdArgs = ["/d", "/s", "/c", buildCmdLine(`${command}.cmd`, args)];
   return spawn("cmd.exe", cmdArgs, { stdio: "inherit" });
 }
 
@@ -110,6 +110,7 @@ function escapeCmdArg(arg: string): string {
   if (!arg.length) {
     return '""';
   }
+  const needsQuotes = /[\s"]/g.test(arg);
   const escaped = arg.replace(/(["^&|<>%!()])/g, "^$1");
-  return `"${escaped}"`;
+  return needsQuotes ? `"${escaped}"` : escaped;
 }
