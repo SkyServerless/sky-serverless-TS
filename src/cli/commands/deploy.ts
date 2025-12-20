@@ -61,6 +61,7 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
     await fsp.copyFile(tgzSourcePath, path.join(artifactDir, tgzName));
 
     const entrypointRelative = path.relative(result.outDir, result.entrypointJs);
+    const entrypointRelativePosix = entrypointRelative.split(path.sep).join("/");
 
     // 4. Create and prune package.json for production
     const pkgJsonPath = path.join(process.cwd(), "package.json");
@@ -71,10 +72,10 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
         version: originalPkg.version,
         private: originalPkg.private ?? true,
         scripts: {
-          start: `node ${entrypointRelative}`,
+          start: `node ${entrypointRelativePosix}`,
         },
         dependencies: originalPkg.dependencies,
-        main: entrypointRelative,
+        main: entrypointRelativePosix,
       };
       // Point to the packed local framework
       if (deployPkg.dependencies && typeof deployPkg.dependencies === "object") {
@@ -89,7 +90,7 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
     // 5. Generate Dockerfile and .dockerignore for GCP deployment
     if (result.provider === "gcp") {
       logInfo(`Generating Dockerfile in ${artifactDir}...`);
-      const dockerfileContent = createDockerfile(tgzName, entrypointRelative);
+      const dockerfileContent = createDockerfile(tgzName, entrypointRelativePosix);
       await fsp.writeFile(path.join(artifactDir, "Dockerfile"), dockerfileContent);
 
       const dockerignoreContent = `
