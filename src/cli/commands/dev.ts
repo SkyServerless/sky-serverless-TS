@@ -1,6 +1,7 @@
 import path from "node:path";
 import { loadSkyConfig, logError, logInfo, parseCommandArgs, resolveEntryPath, toBoolean } from "../utils";
 import http from "node:http";
+import net from "node:net";
 import { startNodeHttpServer } from "../../../src/providers/node-http-adapter";
 import fs from "node:fs";
 import { App } from "../../core/app";
@@ -29,7 +30,10 @@ export async function handleDevCommand(argv: string[]): Promise<void> {
 
   logInfo(`Starting dev server using ${path.relative(projectRoot, entryPath)}`);
   let server: http.Server | null = null;
+  let serverSockets = new Set<net.Socket>();
   let shuttingDown = false;
+  let restarting = false;
+  let restartQueued = false;
 
   const startServer = async () => {
     try {
@@ -38,6 +42,14 @@ export async function handleDevCommand(argv: string[]): Promise<void> {
         port,
         logger: (message) => logInfo(message),
       });
+      serverSockets = new Set();
+      server.on("connection", (socket) => {
+        serverSockets.add(socket);
+        socket.on("close", () => {
+          serverSockets.delete(socket);
+        });
+      });
+      logInfo("Dev server ready.");
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logError(`Failed to start dev server: ${reason}`);
@@ -48,10 +60,31 @@ export async function handleDevCommand(argv: string[]): Promise<void> {
     if (!server) {
       return;
     }
+    logInfo("Stopping dev server...");
+    for (const socket of serverSockets) {
+      socket.destroy();
+    }
+    serverSockets.clear();
     await new Promise<void>((resolve) => {
       server?.close(() => resolve());
     });
     server = null;
+    logInfo("Dev server stopped.");
+  };
+
+  const restartServer = async () => {
+    if (restarting || shuttingDown) {
+      restartQueued = true;
+      return;
+    }
+    restarting = true;
+    do {
+      restartQueued = false;
+      logInfo("Detected change. Restarting dev server...");
+      await stopServer();
+      await startServer();
+    } while (restartQueued && !shuttingDown);
+    restarting = false;
   };
 
   await startServer();
@@ -63,12 +96,7 @@ export async function handleDevCommand(argv: string[]): Promise<void> {
       : ["src"];
     const watchPaths = watchTargets.map((target) => path.resolve(projectRoot, target));
     const watcher = createWatcher(watchPaths, async () => {
-      if (shuttingDown) {
-        return;
-      }
-      logInfo("Detected change. Restarting dev server...");
-      await stopServer();
-      await startServer();
+      await restartServer();
     });
     cleanups.push(async () => watcher.close());
     logInfo(`Watching ${watchPaths.map((p) => path.relative(projectRoot, p)).join(", ")}`);
