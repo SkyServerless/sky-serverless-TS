@@ -31,7 +31,9 @@
     "example:gcp": "ts-node --project tsconfig.json examples/gcp/server.ts",
     "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js"
   },
-  "dependencies": {},
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  },
   "devDependencies": {
     "@types/node": "^20.19.26",
     "@vitest/coverage-v8": "^4.0.15",

@@ -4,6 +4,7 @@ import http from "node:http";
 import { startNodeHttpServer } from "../../../src/providers/node-http-adapter";
 import fs from "node:fs";
 import { App } from "../../core/app";
+import chokidar from "chokidar";
 
 export async function handleDevCommand(argv: string[]): Promise<void> {
   const { options } = parseCommandArgs(argv);
@@ -32,7 +33,7 @@ export async function handleDevCommand(argv: string[]): Promise<void> {
 
   const startServer = async () => {
     try {
-      const app = await loadApp(entryPath);
+      const app = await loadApp(entryPath, projectRoot);
       server = startNodeHttpServer(app, {
         port,
         logger: (message) => logInfo(message),
@@ -132,22 +133,21 @@ function resolveProjectModule(moduleName: string, projectRoot: string): string {
 
 
 function createWatcher(pathsToWatch: string[], onChange: () => void) {
-  const watchers = pathsToWatch
-    .filter((watchPath) => fs.existsSync(watchPath))
-    .map((watchPath) => {
-      const handler = debounce(onChange, 200);
-      try {
-        return fs.watch(watchPath, { recursive: true }, handler);
-      } catch {
-        return fs.watch(watchPath, {}, handler);
-      }
-    });
+  const watchTargets = pathsToWatch.filter((watchPath) => fs.existsSync(watchPath));
+  const handler = debounce(onChange, 200);
+  const watcher = chokidar.watch(watchTargets, {
+    ignoreInitial: true,
+    ignored: [/[\\/]node_modules[\\/]/, /[\\/]\.git[\\/]/],
+  });
+  watcher.on("add", handler);
+  watcher.on("change", handler);
+  watcher.on("unlink", handler);
+  watcher.on("addDir", handler);
+  watcher.on("unlinkDir", handler);
 
   return {
     close() {
-      for (const watcher of watchers) {
-        watcher.close();
-      }
+      return watcher.close();
     },
   };
 }
@@ -166,9 +166,9 @@ function debounce(fn: () => void, delayMs: number) {
 }
 
 
-async function loadApp(entryPath: string): Promise<App> {
+async function loadApp(entryPath: string, projectRoot: string): Promise<App> {
   const absoluteEntry = path.resolve(entryPath);
-  purgeRequireCache(absoluteEntry);
+  purgeRequireCache(absoluteEntry, projectRoot);
   let imported: unknown;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -207,12 +207,34 @@ async function loadApp(entryPath: string): Promise<App> {
   return app;
 }
 
-function purgeRequireCache(modulePath: string): void {
+function purgeRequireCache(modulePath: string, projectRoot?: string): void {
   try {
     const resolved = require.resolve(modulePath);
     delete require.cache[resolved];
   } catch {
     // Ignore cache purge errors
+  }
+  if (!projectRoot) {
+    return;
+  }
+
+  const normalizedRoot = path.resolve(projectRoot);
+  const rootKey =
+    process.platform === "win32" ? normalizedRoot.toLowerCase() : normalizedRoot;
+  const rootPrefix = rootKey.endsWith(path.sep) ? rootKey : `${rootKey}${path.sep}`;
+  const nodeModulesSegment = `${path.sep}node_modules${path.sep}`;
+
+  for (const cacheKey of Object.keys(require.cache)) {
+    const normalizedKey = path.normalize(cacheKey);
+    const comparableKey =
+      process.platform === "win32" ? normalizedKey.toLowerCase() : normalizedKey;
+    if (!comparableKey.startsWith(rootPrefix)) {
+      continue;
+    }
+    if (comparableKey.includes(nodeModulesSegment)) {
+      continue;
+    }
+    delete require.cache[cacheKey];
   }
 }
 
