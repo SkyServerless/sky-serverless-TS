@@ -1,3 +1,5 @@
+import "./route-meta";
+
 export * from "./jwt";
 
 /** @internal */

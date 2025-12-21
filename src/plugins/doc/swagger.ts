@@ -1,6 +1,58 @@
 import { SkyPlugin } from "../../core/plugin";
 import { RouteDefinition, RouteMeta, Router } from "../../core/router";
 
+export interface RouteDocResponseContent extends Record<string, unknown> {
+  schema?: unknown;
+  example?: unknown;
+  examples?: Record<string, unknown>;
+}
+
+export interface RouteDocResponse extends Record<string, unknown> {
+  description?: string;
+  content?: Record<string, RouteDocResponseContent>;
+  headers?: Record<string, unknown>;
+}
+
+export type RouteDocResponses = Record<string, RouteDocResponse | string>;
+
+export interface RouteDocBodyContent extends Record<string, unknown> {
+  schema?: unknown;
+  example?: unknown;
+  examples?: Record<string, unknown>;
+}
+
+export interface RouteDocRequestBody extends Record<string, unknown> {
+  description?: string;
+  required?: boolean;
+  content?: Record<string, RouteDocBodyContent>;
+}
+
+export type RouteDocParameterLocation =
+  | "query"
+  | "header"
+  | "path"
+  | "cookie";
+
+export interface RouteDocParameter extends Record<string, unknown> {
+  name: string;
+  in: RouteDocParameterLocation;
+  description?: string;
+  required?: boolean;
+  schema?: Record<string, unknown>;
+  deprecated?: boolean;
+  allowEmptyValue?: boolean;
+  example?: unknown;
+}
+
+interface RouteDocRouteMeta {
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  responses?: RouteDocResponses;
+  requestBody?: RouteDocRequestBody;
+  parameters?: RouteDocParameter[];
+}
+
 export interface SwaggerPluginOptions {
   jsonPath?: string;
   uiPath?: string;
@@ -146,19 +198,20 @@ export function buildOpenApiDocument(
 }
 
 function createOperationObject(meta?: RouteMeta): Record<string, unknown> {
-  const responses = buildResponses(meta?.responses);
+  const routeMeta = meta as RouteDocRouteMeta | undefined;
+  const responses = buildResponses(routeMeta?.responses);
   const operation: Record<string, unknown> = { responses };
-  const requestBody = buildRequestBody(meta?.requestBody);
-  const parameters = buildParameters(meta?.parameters);
+  const requestBody = buildRequestBody(routeMeta?.requestBody);
+  const parameters = buildParameters(routeMeta?.parameters);
 
-  if (meta?.summary) {
-    operation.summary = meta.summary;
+  if (routeMeta?.summary) {
+    operation.summary = routeMeta.summary;
   }
-  if (meta?.description) {
-    operation.description = meta.description;
+  if (routeMeta?.description) {
+    operation.description = routeMeta.description;
   }
-  if (meta?.tags) {
-    operation.tags = meta.tags;
+  if (routeMeta?.tags) {
+    operation.tags = routeMeta.tags;
   }
   if (requestBody) {
     operation.requestBody = requestBody;
@@ -170,9 +223,7 @@ function createOperationObject(meta?: RouteMeta): Record<string, unknown> {
   return operation;
 }
 
-function buildResponses(
-  responses?: RouteMeta["responses"],
-): Record<string, unknown> {
+function buildResponses(responses?: RouteDocResponses): Record<string, unknown> {
   if (!responses || Object.keys(responses).length === 0) {
     return {
       "200": { description: "Successful response" },
@@ -198,7 +249,7 @@ function buildResponses(
 }
 
 function buildRequestBody(
-  requestBody?: RouteMeta["requestBody"],
+  requestBody?: RouteDocRequestBody,
 ): Record<string, unknown> | undefined {
   if (!requestBody?.content || Object.keys(requestBody.content).length === 0) {
     return undefined;
@@ -224,7 +275,7 @@ function buildRequestBody(
 }
 
 function buildParameters(
-  parameters?: RouteMeta["parameters"],
+  parameters?: RouteDocParameter[],
 ): Array<Record<string, unknown>> {
   if (!parameters?.length) {
     return [];

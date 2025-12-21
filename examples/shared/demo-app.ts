@@ -1,7 +1,5 @@
 import { App, httpBadRequest, httpError, httpOk } from "../../src";
-import { swaggerPlugin } from "../../src/plugins/doc";
-import { AuthHelpers } from "../../src/plugins/auth";
-import { MysqlClient } from "../../src/plugins/data/mysql";
+import { AuthHelpers, MysqlClient, swaggerPlugin } from "../../src/plugins";
 import {
   DemoAuthUser,
   authenticateDemoUser,

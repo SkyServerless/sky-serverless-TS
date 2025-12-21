@@ -1,57 +1,11 @@
 import { Handler } from "./context";
 import { SkyHttpMethod } from "./http";
 
-export interface RouteDocResponseContent extends Record<string, unknown> {
-  schema?: unknown;
-  example?: unknown;
-  examples?: Record<string, unknown>;
-}
+export interface RouteMetaExtensions {}
 
-export interface RouteDocResponse extends Record<string, unknown> {
-  description?: string;
-  content?: Record<string, RouteDocResponseContent>;
-  headers?: Record<string, unknown>;
-}
-
-export type RouteDocResponses = Record<string, RouteDocResponse | string>;
-
-export interface RouteDocBodyContent extends Record<string, unknown> {
-  schema?: unknown;
-  example?: unknown;
-  examples?: Record<string, unknown>;
-}
-
-export interface RouteDocRequestBody extends Record<string, unknown> {
-  description?: string;
-  required?: boolean;
-  content?: Record<string, RouteDocBodyContent>;
-}
-
-export type RouteDocParameterLocation =
-  | "query"
-  | "header"
-  | "path"
-  | "cookie";
-
-export interface RouteDocParameter extends Record<string, unknown> {
-  name: string;
-  in: RouteDocParameterLocation;
-  description?: string;
-  required?: boolean;
-  schema?: Record<string, unknown>;
-  deprecated?: boolean;
-  allowEmptyValue?: boolean;
-  example?: unknown;
-}
-
-export interface RouteMeta extends Record<string, unknown> {
-  summary?: string;
-  description?: string;
-  tags?: string[];
-  responses?: RouteDocResponses;
-  requestBody?: RouteDocRequestBody;
-  parameters?: RouteDocParameter[];
-}
+export interface RouteMeta
+  extends Record<string, unknown>,
+    RouteMetaExtensions {}
 
 export interface RouteDefinition<
   THandler extends Handler = Handler,
@@ -73,8 +27,6 @@ export interface RouteMatch<
   routePattern: string;
 }
 
-type RouteMatcher = (path: string) => Record<string, string> | null;
-
 type NormalizedRouteDefinition<
   THandler extends Handler = Handler,
   TMeta extends RouteMeta = RouteMeta,
@@ -88,11 +40,27 @@ interface InternalRoute<
   TMeta extends RouteMeta = RouteMeta,
 > {
   definition: NormalizedRouteDefinition<THandler, TMeta>;
-  matchPath: RouteMatcher;
+}
+
+const MAX_MATCH_CACHE = 1000;
+
+interface RouteTrieParam {
+  name: string;
+  node: RouteTrieNode;
+}
+
+interface RouteTrieNode {
+  staticChildren: Map<string, RouteTrieNode>;
+  paramChild?: RouteTrieParam;
+  wildcardChild?: RouteTrieParam;
+  routes: InternalRoute[];
 }
 
 export class Router {
   private readonly routes: InternalRoute[] = [];
+  private readonly triesByMethod = new Map<string, RouteTrieNode>();
+  private readonly matchCache = new Map<string, RouteMatch | null>();
+  private matchCacheEnabled = true;
   private version = 0;
 
   register(definition: RouteDefinition): this;
@@ -113,31 +81,35 @@ export class Router {
         ? createRouteDefinition(methodOrDefinition, path ?? "/", handler as Handler, meta)
         : normalizeRouteDefinition(methodOrDefinition);
 
-    this.routes.push({
-      definition,
-      matchPath: buildRouteMatcher(definition.pathPattern),
-    });
+    const internalRoute: InternalRoute = { definition };
+    this.routes.push(internalRoute);
+    this.registerInTrie(internalRoute);
     this.version += 1;
+    this.matchCache.clear();
     return this;
   }
 
   match(method: SkyHttpMethod | string, path: string): RouteMatch | null {
     const normalizedMethod = method.toUpperCase();
-    for (const route of this.routes) {
-      if (route.definition.method !== normalizedMethod) {
-        continue;
-      }
+    const cacheKey = this.matchCacheEnabled
+      ? `${normalizedMethod} ${path}`
+      : null;
 
-      const params = route.matchPath(path);
-      if (params) {
-        return {
-          route: route.definition,
-          params,
-          routePattern: route.definition.pathPattern,
-        };
+    if (cacheKey) {
+      const cached = this.getCachedMatch(cacheKey);
+      if (cached !== undefined) {
+        return cached;
       }
     }
-    return null;
+
+    const trie = this.triesByMethod.get(normalizedMethod);
+    const segments = parsePathSegments(path);
+    const match = trie ? matchTrie(trie, segments, 0, undefined) : null;
+
+    if (cacheKey) {
+      this.setCachedMatch(cacheKey, match);
+    }
+    return match;
   }
 
   getRoutes(): RouteDefinition[] {
@@ -147,6 +119,162 @@ export class Router {
   getVersion(): number {
     return this.version;
   }
+
+  setMatchCacheEnabled(enabled: boolean): void {
+    this.matchCacheEnabled = enabled;
+    if (!enabled) {
+      this.matchCache.clear();
+    }
+  }
+
+  private getCachedMatch(cacheKey: string): RouteMatch | null | undefined {
+    const cached = this.matchCache.get(cacheKey);
+    if (cached === undefined) {
+      return undefined;
+    }
+    this.matchCache.delete(cacheKey);
+    this.matchCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  private setCachedMatch(cacheKey: string, value: RouteMatch | null): void {
+    if (this.matchCache.has(cacheKey)) {
+      this.matchCache.delete(cacheKey);
+    }
+    this.matchCache.set(cacheKey, value);
+    if (this.matchCache.size > MAX_MATCH_CACHE) {
+      const iterator = this.matchCache.keys();
+      let firstKey = iterator.next().value;
+      if (firstKey === undefined) {
+        firstKey = iterator.next().value;
+      }
+      if (firstKey !== undefined) {
+        this.matchCache.delete(firstKey);
+      }
+    }
+  }
+
+  private registerInTrie(route: InternalRoute): void {
+    const methodKey = route.definition.method;
+    let root = this.triesByMethod.get(methodKey);
+    if (!root) {
+      root = createTrieNode();
+      this.triesByMethod.set(methodKey, root);
+    }
+
+    const segments = parsePathSegments(route.definition.pathPattern);
+    let node = root;
+    for (const segment of segments) {
+      if (segment.startsWith(":")) {
+        const name = segment.slice(1);
+        if (!node.paramChild) {
+          node.paramChild = { name, node: createTrieNode() };
+        }
+        node = node.paramChild.node;
+        continue;
+      }
+      if (segment.startsWith("*")) {
+        const name = segment.slice(1) || "wildcard";
+        if (!node.wildcardChild) {
+          node.wildcardChild = { name, node: createTrieNode() };
+        }
+        node = node.wildcardChild.node;
+        continue;
+      }
+
+      let child = node.staticChildren.get(segment);
+      if (!child) {
+        child = createTrieNode();
+        node.staticChildren.set(segment, child);
+      }
+      node = child;
+    }
+    node.routes.push(route);
+  }
+}
+
+function createTrieNode(): RouteTrieNode {
+  return {
+    staticChildren: new Map(),
+    routes: [],
+  };
+}
+
+function matchTrie(
+  node: RouteTrieNode,
+  segments: string[],
+  index: number,
+  params: Record<string, string> | undefined,
+): RouteMatch | null {
+  if (index === segments.length) {
+    if (node.routes.length > 0) {
+      return buildMatch(node.routes[0], params);
+    }
+    return null;
+  }
+
+  const segment = segments[index];
+  const staticChild = node.staticChildren.get(segment);
+  if (staticChild) {
+    const result = matchTrie(staticChild, segments, index + 1, params);
+    if (result) {
+      return result;
+    }
+  }
+
+  if (node.paramChild) {
+    const value = decodeURIComponent(segment);
+    const nextParams = addParam(params, node.paramChild.name, value);
+    const result = matchTrie(node.paramChild.node, segments, index + 1, nextParams);
+    if (result) {
+      return result;
+    }
+  }
+
+  if (node.wildcardChild) {
+    const name = node.wildcardChild.name;
+    for (let end = segments.length; end > index; end -= 1) {
+      const rawValue = segments.slice(index, end).join("/");
+      const value = decodeURIComponent(rawValue);
+      const nextParams = addParam(params, name, value);
+      const result = matchTrie(node.wildcardChild.node, segments, end, nextParams);
+      if (result) {
+        return result;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildMatch(
+  route: InternalRoute,
+  params: Record<string, string> | undefined,
+): RouteMatch {
+  return {
+    route: route.definition,
+    params: params ?? {},
+    routePattern: route.definition.pathPattern,
+  };
+}
+
+function addParam(
+  params: Record<string, string> | undefined,
+  key: string,
+  value: string,
+): Record<string, string> {
+  if (!params) {
+    return { [key]: value };
+  }
+  return { ...params, [key]: value };
+}
+
+function parsePathSegments(path: string): string[] {
+  const normalized = normalizePath(path);
+  if (normalized === "/") {
+    return [];
+  }
+  return normalized.split("/").filter((segment) => segment.length > 0);
 }
 
 function createRouteDefinition(
@@ -170,6 +298,8 @@ function normalizeRouteDefinition(definition: RouteDefinition): NormalizedRouteD
     pathPattern: definition.pathPattern ?? definition.path,
   };
 }
+
+type RouteMatcher = (path: string) => Record<string, string> | null;
 
 function buildRouteMatcher(routePattern: string): RouteMatcher {
   const compiled = compileRoutePattern(routePattern);
@@ -221,7 +351,7 @@ function compileRoutePattern(pattern: string): CompiledPattern {
   let wildcardName: string | undefined;
   let regexSource = "^";
 
-  segments.forEach((segment, index) => {
+  segments.forEach((segment) => {
     regexSource += "\\/";
     if (segment.startsWith(":")) {
       const paramName = segment.slice(1);
@@ -269,4 +399,5 @@ function escapeRegex(value: string): string {
  */
 export const __routerInternals = {
   createRouteMatcherFromCompiled,
+  buildRouteMatcher,
 };

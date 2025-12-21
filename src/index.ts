@@ -9,8 +9,4 @@ export * from "./core/provider-adapter";
 export * from "./providers/node-http-adapter";
 export * from "./providers/openshift/openShiftProviderAdapter";
 export * from "./providers/gcp/gcpFunctionsProviderAdapter";
-export * from "./plugins/data";
-export * from "./plugins/doc";
-export * from "./plugins/auth";
-
 export const SKY_CORE_SYMBOL = Symbol.for("sky.core");

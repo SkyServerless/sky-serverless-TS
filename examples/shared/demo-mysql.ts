@@ -1,4 +1,4 @@
-import { MysqlPool, mysqlPlugin } from "../../src/plugins/data/mysql";
+import { MysqlPool, mysqlPlugin } from "../../src/plugins";
 
 export interface DemoUserRow {
   id: number;
