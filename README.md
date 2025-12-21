@@ -1,6 +1,6 @@
 # SkyServerless-TS
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Early / Experimental
 **Philosophy:** Serverless-First, Provider-Agnostic
 
