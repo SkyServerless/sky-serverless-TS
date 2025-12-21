@@ -23,11 +23,10 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
   }
 
   // 1. Find and pack the sky-serverless framework
-  const frameworkMainPath = require.resolve("sky-serverless", {
-    paths: [process.cwd(), __dirname],
+  const frameworkPkgJsonPath = require.resolve("sky-serverless/package.json", {
+    paths: [process.cwd()],
   });
-  const frameworkRoot = path.dirname(path.dirname(frameworkMainPath));
-  const frameworkPkgJsonPath = path.join(frameworkRoot, "package.json");
+  const frameworkRoot = path.dirname(frameworkPkgJsonPath);
   const frameworkPkgJson = JSON.parse(
     await fsp.readFile(frameworkPkgJsonPath, "utf-8"),
   );
