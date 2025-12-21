@@ -1,6 +1,6 @@
 # SkyServerless-TS
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Early / Experimental
 **Philosophy:** Serverless-First, Provider-Agnostic
 
@@ -123,7 +123,11 @@ The scaffold exports a `createApp()` factory. It is the default shape expected b
 
 ```ts
 import { App, httpOk } from "sky-serverless";
-import { mysqlPlugin, redisPlugin, cachePlugin } from "sky-serverless";
+import {
+  mysqlPlugin,
+  redisPlugin,
+  cachePlugin,
+} from "sky-serverless/plugins/data";
 
 export function createApp(): App {
   const app = new App({
@@ -228,10 +232,19 @@ Notes:
 
 ## Native plugins (same pattern as scaffold)
 
+Native plugins are imported from explicit entrypoints. This keeps plugin-specific typings (route meta) available only when you opt in.
+
+- Data plugins: `sky-serverless/plugins/data`
+- Swagger docs: `sky-serverless/plugins/doc`
+- JWT auth: `sky-serverless/plugins/auth`
+- All plugins (convenience import): `sky-serverless/plugins`
+
+When you import `sky-serverless/plugins`, all native plugin typings are enabled (docs + auth meta) even if you only use one plugin.
+
 ### mysqlPlugin
 
 ```ts
-import { mysqlPlugin, MysqlClient } from "sky-serverless";
+import { mysqlPlugin, MysqlClient } from "sky-serverless/plugins/data";
 
 const app = new App({
   plugins: [mysqlPlugin({ connectionString: process.env.SKY_MYSQL_URI })],
@@ -254,7 +267,7 @@ Options:
 ### mssqlPlugin
 
 ```ts
-import { mssqlPlugin, MssqlClient } from "sky-serverless";
+import { mssqlPlugin, MssqlClient } from "sky-serverless/plugins/data";
 
 const app = new App({
   plugins: [mssqlPlugin({ connectionString: process.env.SKY_MSSQL_CONN_STR })],
@@ -278,7 +291,11 @@ Options:
 ### redisPlugin + cachePlugin
 
 ```ts
-import { redisPlugin, cachePlugin, CacheHelper } from "sky-serverless";
+import {
+  redisPlugin,
+  cachePlugin,
+  CacheHelper,
+} from "sky-serverless/plugins/data";
 
 const app = new App({
   plugins: [
@@ -299,7 +316,7 @@ app.get("/cache/ping", async (_req, ctx) => {
 ### swaggerPlugin
 
 ```ts
-import { swaggerPlugin } from "sky-serverless";
+import { swaggerPlugin } from "sky-serverless/plugins/doc";
 
 const app = new App({
   plugins: [
@@ -312,10 +329,12 @@ const app = new App({
 });
 ```
 
+Importing `sky-serverless/plugins/doc` enables route meta autocomplete for `summary`, `description`, `tags`, `responses`, `requestBody`, and `parameters`.
+
 ### authPlugin
 
 ```ts
-import { authPlugin, AuthHelpers, AuthUser } from "sky-serverless";
+import { authPlugin, AuthHelpers, AuthUser } from "sky-serverless/plugins/auth";
 
 const app = new App({
   plugins: [
@@ -340,6 +359,8 @@ app.post("/login", async (req, ctx) => {
   return { tokens: auth.issueTokens(user) };
 });
 ```
+
+Importing `sky-serverless/plugins/auth` enables `meta.auth` typing for route-level auth configuration.
 
 ## Provider adapter contract (for custom providers)
 

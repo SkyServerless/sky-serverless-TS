@@ -1,6 +1,6 @@
 {
   "name": "sky-serverless",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -29,7 +29,8 @@
     "example:openshift": "ts-node --project tsconfig.json examples/openshift/server.ts",
     "example:openshift:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/openshift/server.js",
     "example:gcp": "ts-node --project tsconfig.json examples/gcp/server.ts",
-    "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js"
+    "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js",
+    "bench:core": "ts-node --project tsconfig.json scripts/benchmark.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"

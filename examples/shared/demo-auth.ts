@@ -1,5 +1,5 @@
 import { SkyPlugin } from "../../src/core/plugin";
-import { authPlugin, AuthUser } from "../../src/plugins/auth";
+import { authPlugin, AuthUser } from "../../src/plugins";
 
 export interface DemoAuthUser extends AuthUser {
   email: string;

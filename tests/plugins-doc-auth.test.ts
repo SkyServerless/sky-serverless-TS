@@ -1,5 +1,5 @@
 import { createHmac, generateKeyPairSync } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/core/app";
 import { SkyContext } from "../src/core/context";
 import { SkyRequest, SkyResponse } from "../src/core/http";
@@ -392,6 +392,7 @@ const {
   extractCookie,
   extractBearerToken,
   resolveAuthConfig,
+  resolveRouteAuthMode,
 } = __authInternals;
 const { convertRouterPathToOpenApi } = __swaggerInternals;
 
@@ -577,6 +578,167 @@ describe("authPlugin", () => {
     });
   });
 
+  it("blocks handlers for routes that require authentication", async () => {
+    const app = createAuthApp();
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/secure-required",
+      handler,
+      {
+        auth: { required: true },
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/secure-required"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("honors defaultRouteAuthMode for routes without metadata", async () => {
+    const app = createAuthApp({ defaultRouteAuthMode: "required" });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get("/needs-auth", handler);
+
+    const response = await app.handle(
+      buildRequest("GET", "/needs-auth"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("skips token resolution when route meta marks it as public", async () => {
+    const tokenResolver = vi.fn(() => {
+      throw new Error("resolver should not execute");
+    });
+    const app = createAuthApp({ tokenResolver });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/public",
+      handler,
+      {
+        auth: { public: true },
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/public"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(tokenResolver).not.toHaveBeenCalled();
+  });
+
+  it("respects default mode even when meta exists without auth", async () => {
+    const app = createAuthApp({ defaultRouteAuthMode: "required" });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/meta-no-auth",
+      handler,
+      {
+        summary: "Has doc metadata but no auth field",
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/meta-no-auth"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("supports explicit auth.mode overrides", async () => {
+    const tokenResolver = vi.fn(() => {
+      throw new Error("resolver should not execute");
+    });
+    const app = createAuthApp({ tokenResolver });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/auth-mode-public",
+      handler,
+      {
+        auth: { mode: "public" },
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/auth-mode-public"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(tokenResolver).not.toHaveBeenCalled();
+  });
+
+  it("falls back to default when auth meta object is empty", async () => {
+    const app = createAuthApp({ defaultRouteAuthMode: "required" });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/auth-meta-empty",
+      handler,
+      {
+        auth: {},
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/auth-meta-empty"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("treats auth optional flag as best effort even if default requires auth", async () => {
+    const app = createAuthApp({ defaultRouteAuthMode: "required" });
+    const handler = vi.fn(() => httpOk({ ok: true }));
+    app.get(
+      "/optional-auth",
+      handler,
+      {
+        auth: { optional: true },
+      },
+    );
+
+    const response = await app.handle(
+      buildRequest("GET", "/optional-auth"),
+      cloneContext(),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to default when router has no match for route pattern", async () => {
+    const plugin = authPlugin({
+      config: { jwtSecret: "unit-secret" },
+      defaultRouteAuthMode: "required",
+    });
+    const router = new Router();
+    await plugin.setup?.({ router });
+
+    const context = cloneContext();
+    context.routePattern = "/ghost";
+
+    const response = await plugin.onRequest?.(
+      buildRequest("GET", "/ghost"),
+      context,
+    );
+
+    expect(response?.statusCode).toBe(401);
+  });
+
   it("supports jwtSecret from environment fallback", () => {
     const original = process.env.SKY_AUTH_JWT_SECRET;
     process.env.SKY_AUTH_JWT_SECRET = "env-secret";
@@ -650,6 +812,183 @@ describe("authPlugin internals", () => {
     refreshTokenTtlSeconds: 120,
   };
   const buildHelpers = (config = helperConfig) => createAuthHelpers(config);
+
+  it("resolveRouteAuthMode reads router metadata when route matches", () => {
+    const router = new Router();
+    router.register({
+      method: "GET",
+      path: "/secure",
+      handler: () => httpOk({ ok: true }),
+      meta: { auth: { required: true } },
+    });
+    const context = cloneContext();
+    context.routePattern = "/secure";
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/secure"),
+      context,
+      "optional",
+    );
+
+    expect(mode).toBe("required");
+  });
+
+  it("resolveRouteAuthMode falls back when router has no matching route", () => {
+    const router = new Router();
+    router.register({
+      method: "GET",
+      path: "/known",
+      handler: () => httpOk({ ok: true }),
+    });
+    const context = cloneContext();
+    context.routePattern = "/unknown";
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/unknown"),
+      context,
+      "required",
+    );
+
+    expect(mode).toBe("required");
+  });
+
+  it("resolveRouteAuthMode returns default when router is undefined", () => {
+    const mode = resolveRouteAuthMode(
+      undefined,
+      buildRequest("GET", "/any"),
+      cloneContext(),
+      "public",
+    );
+
+    expect(mode).toBe("public");
+  });
+
+  it("resolveRouteAuthMode returns default when route pattern is missing", () => {
+    const router = new Router();
+    router.register({
+      method: "GET",
+      path: "/known",
+      handler: () => httpOk({ ok: true }),
+    });
+    const context = cloneContext();
+    context.routePattern = undefined;
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/known"),
+      context,
+      "optional",
+    );
+
+    expect(mode).toBe("optional");
+  });
+
+  it("resolveRouteAuthMode differentiates HTTP methods", () => {
+    const router = new Router();
+    router.register({
+      method: "POST",
+      path: "/secure",
+      handler: () => httpOk({ ok: true }),
+      meta: { auth: { required: true } },
+    });
+    const context = cloneContext();
+    context.routePattern = "/secure";
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/secure"),
+      context,
+      "optional",
+    );
+
+    expect(mode).toBe("optional");
+  });
+
+  it("resolveRouteAuthMode honors explicit path patterns", () => {
+    const router = new Router();
+    router.register({
+      method: "GET",
+      path: "/wildcard",
+      pathPattern: "/wildcard/:id",
+      handler: () => httpOk({ ok: true }),
+      meta: { auth: { required: true } },
+    });
+    const context = cloneContext();
+    context.routePattern = "/wildcard/:id";
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/wildcard/123"),
+      context,
+      "optional",
+    );
+
+    expect(mode).toBe("required");
+  });
+
+  it("resolveRouteAuthMode handles routers without registered routes", () => {
+    const router = new Router();
+    const context = cloneContext();
+    context.routePattern = "/ghost";
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/ghost"),
+      context,
+      "required",
+    );
+
+    expect(mode).toBe("required");
+  });
+
+  it("resolveRouteAuthMode returns default for missing router even when pattern exists", () => {
+    const context = cloneContext();
+    context.routePattern = "/ghost";
+    const mode = resolveRouteAuthMode(
+      undefined,
+      buildRequest("GET", "/ghost"),
+      context,
+      "public",
+    );
+
+    expect(mode).toBe("public");
+  });
+
+  it("resolveRouteAuthMode normalizes undefined http methods", () => {
+    const router = new Router();
+    router.register({
+      method: "GET",
+      path: "/with-method",
+      handler: () => httpOk({ ok: true }),
+      meta: { auth: { required: true } },
+    });
+    const request = buildRequest("GET", "/with-method");
+    (request as SkyRequest).method = undefined as unknown as string;
+    const context = cloneContext();
+    context.routePattern = "/with-method";
+
+    const mode = resolveRouteAuthMode(router, request, context, "optional");
+    expect(mode).toBe("optional");
+  });
+
+  it("resolveRouteAuthMode falls back to raw path when pathPattern is missing", () => {
+    const router = {
+      getRoutes: () => [
+        {
+          method: "GET",
+          path: "/legacy",
+          handler: () => httpOk({ ok: true }),
+        },
+      ],
+    } as unknown as Router;
+    const context = cloneContext();
+    context.routePattern = "/legacy";
+
+    const mode = resolveRouteAuthMode(
+      router,
+      buildRequest("GET", "/legacy"),
+      context,
+      "optional",
+    );
+
+    expect(mode).toBe("optional");
+  });
 
   it("defaults RS256 publicKey to privateKey when unspecified", () => {
     const resolved = resolveAuthConfig(

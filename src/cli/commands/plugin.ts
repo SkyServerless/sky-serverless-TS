@@ -61,6 +61,7 @@ export async function scaffoldPlugin(options: { rawName: string; directory: stri
     { relativePath: "tsconfig.json", contents: createPluginTsconfig() },
     { relativePath: "README.md", contents: createPluginReadme(packageName) },
     { relativePath: ".gitignore", contents: createGitignore() },
+    { relativePath: "src/route-meta.ts", contents: createPluginRouteMetaSource(packageName) },
     { relativePath: "src/index.ts", contents: createPluginSource(packageName) },
   ];
 
@@ -141,7 +142,8 @@ const app = new App({
 
 function createPluginSource(packageName: string): string {
   const functionName = toPascalCase(packageName.replace(/^@[^/]+\//, ""));
-  return `import type { SkyPlugin } from "sky-serverless";
+  return `import "./route-meta";
+import type { SkyPlugin } from "sky-serverless";
 
 export interface ${functionName}PluginOptions {
   greeting?: string;
@@ -162,6 +164,21 @@ export function create${functionName}Plugin(
       context.meta["${packageName}"] = greeting;
     },
   };
+}
+`;
+}
+
+function createPluginRouteMetaSource(packageName: string): string {
+  const functionName = toPascalCase(packageName.replace(/^@[^/]+\//, ""));
+  return `import type { RouteMetaExtensions } from "sky-serverless";
+
+export interface ${functionName}RouteMeta {
+  // Example:
+  // auth?: { required?: boolean };
+}
+
+declare module "sky-serverless" {
+  interface RouteMetaExtensions extends ${functionName}RouteMeta {}
 }
 `;
 }

@@ -7,7 +7,9 @@ import {
 } from "node:crypto";
 import { SkyPlugin } from "../../core/plugin";
 import { SkyContext } from "../../core/context";
-import { SkyRequest } from "../../core/http";
+import { SkyRequest, SkyResponse } from "../../core/http";
+import { RouteMeta, Router } from "../../core/router";
+import { httpError } from "../../core/http/responses";
 
 const DEFAULT_ACCESS_TTL = 15 * 60;
 const DEFAULT_REFRESH_TTL = 7 * 24 * 60 * 60;
@@ -43,6 +45,19 @@ export interface AuthHelpers {
   verifyToken<TPayload extends Record<string, unknown>>(token: string): TPayload | null;
 }
 
+export type AuthRouteMode = "public" | "optional" | "required";
+
+export interface AuthRouteSecurityMeta {
+  mode?: AuthRouteMode;
+  required?: boolean;
+  optional?: boolean;
+  public?: boolean;
+}
+
+export interface AuthRouteMeta extends RouteMeta {
+  auth?: AuthRouteSecurityMeta;
+}
+
 export interface AuthPluginOptions {
   config?: Partial<AuthConfig>;
   envSecretKey?: string;
@@ -55,6 +70,7 @@ export interface AuthPluginOptions {
     payload: AccessTokenPayload,
     context: SkyContext,
   ) => Promise<AuthUser | null> | AuthUser | null;
+  defaultRouteAuthMode?: AuthRouteMode;
 }
 
 interface AccessTokenPayload extends Record<string, unknown> {
@@ -86,27 +102,42 @@ export function authPlugin(options: AuthPluginOptions): SkyPlugin {
   const tokenResolver =
     options.tokenResolver ??
     ((request: SkyRequest) => defaultTokenResolver(request, config));
+  const defaultRouteAuthMode = options.defaultRouteAuthMode ?? "optional";
+  let routerRef: Router | undefined;
 
   return {
     name: "@sky/auth-jwt",
     version: "0.1.0",
+    setup({ router }) {
+      routerRef = router;
+    },
     async onRequest(request, context) {
       attachAuthHelpers(context, authServiceKey, authHelpers);
       clearExistingUser(context, request, userServiceKey);
 
+      const authMode = resolveRouteAuthMode(
+        routerRef,
+        request,
+        context,
+        defaultRouteAuthMode,
+      );
+      if (authMode === "public") {
+        return;
+      }
+
       const token = tokenResolver(request, context);
       if (!token) {
-        return;
+        return handleUnauthorized(authMode);
       }
 
       const payload = authHelpers.verifyToken<AccessTokenPayload>(token);
       if (!payload || payload.type !== "access") {
-        return;
+        return handleUnauthorized(authMode);
       }
 
       const user = await resolveUser(payload, context);
       if (!user) {
-        return;
+        return handleUnauthorized(authMode);
       }
 
       context.services[userServiceKey] = user;
@@ -235,6 +266,71 @@ function defaultTokenResolver(
   }
 
   return undefined;
+}
+
+function resolveRouteAuthMode(
+  router: Router | undefined,
+  request: SkyRequest,
+  context: SkyContext,
+  defaultMode: AuthRouteMode,
+): AuthRouteMode {
+  if (!router || !context.routePattern) {
+    return defaultMode;
+  }
+
+  const normalizedMethod = String(request.method ?? "").toUpperCase();
+  let matchedMeta: RouteMeta | undefined;
+  for (const route of router.getRoutes()) {
+    /* c8 ignore next */
+    const pattern = route.pathPattern ?? route.path;
+    if (
+      pattern === context.routePattern &&
+      route.method.toUpperCase() === normalizedMethod
+    ) {
+      matchedMeta = route.meta;
+      break;
+    }
+  }
+  return resolveAuthModeFromMeta(matchedMeta, defaultMode);
+}
+
+function resolveAuthModeFromMeta(
+  meta: RouteMeta | undefined,
+  defaultMode: AuthRouteMode,
+): AuthRouteMode {
+  if (!meta) {
+    return defaultMode;
+  }
+
+  const authMeta = (meta as AuthRouteMeta).auth;
+  if (!authMeta) {
+    return defaultMode;
+  }
+
+  if (authMeta.mode) {
+    return authMeta.mode;
+  }
+  if (authMeta.required) {
+    return "required";
+  }
+  if (authMeta.public) {
+    return "public";
+  }
+  if (authMeta.optional) {
+    return "optional";
+  }
+  return defaultMode;
+}
+
+function handleUnauthorized(mode: AuthRouteMode): SkyResponse | undefined {
+  if (mode === "required") {
+    return unauthorizedResponse();
+  }
+  return undefined;
+}
+
+function unauthorizedResponse(): SkyResponse {
+  return httpError({ statusCode: 401, message: "Unauthorized" });
 }
 
 function issueTokens(
@@ -421,6 +517,7 @@ export const __authInternals = {
   verifyJwt,
   extractCookie,
   extractBearerToken,
+  resolveRouteAuthMode,
 };
 
 interface JwtKeyMaterial {

@@ -128,7 +128,11 @@ export class App {
     }
 
     try {
-      await this.runOnRequest(request, context);
+      const earlyResponse = await this.runOnRequest(request, context);
+      if (earlyResponse) {
+        await this.runOnResponse(request, earlyResponse, context);
+        return earlyResponse;
+      }
 
       if (!routeMatch) {
         const notFound = httpNotFound("Route not found", {
@@ -157,10 +161,14 @@ export class App {
   private async runOnRequest(
     request: SkyRequest,
     context: SkyContext,
-  ): Promise<void> {
+  ): Promise<SkyResponse | undefined> {
     for (const plugin of this.plugins) {
-      await plugin.onRequest?.(request, context);
+      const response = await plugin.onRequest?.(request, context);
+      if (response) {
+        return response;
+      }
     }
+    return undefined;
   }
 
   private async runOnResponse(
