@@ -1,8 +1,43 @@
 {
   "name": "sky-serverless",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins/index.d.ts",
+      "default": "./dist/plugins/index.js"
+    },
+    "./plugins/doc": {
+      "types": "./dist/plugins/doc/index.d.ts",
+      "default": "./dist/plugins/doc/index.js"
+    },
+    "./plugins/auth": {
+      "types": "./dist/plugins/auth/index.d.ts",
+      "default": "./dist/plugins/auth/index.js"
+    },
+    "./plugins/data": {
+      "types": "./dist/plugins/data/index.d.ts",
+      "default": "./dist/plugins/data/index.js"
+    },
+    "./plugins/data/*": {
+      "types": "./dist/plugins/data/*.d.ts",
+      "default": "./dist/plugins/data/*.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "plugins": ["dist/plugins/index.d.ts"],
+      "plugins/auth": ["dist/plugins/auth/index.d.ts"],
+      "plugins/doc": ["dist/plugins/doc/index.d.ts"],
+      "plugins/data": ["dist/plugins/data/index.d.ts"],
+      "plugins/data/*": ["dist/plugins/data/*"]
+    }
+  },
   "bin": {
     "sky": "bin/sky.js"
   },
