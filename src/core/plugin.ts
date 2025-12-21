@@ -12,7 +12,10 @@ export interface SkyPlugin {
   name: string;
   version: string;
   setup?(context: PluginSetupContext): void | Promise<void>;
-  onRequest?(request: SkyRequest, context: SkyContext): void | Promise<void>;
+  onRequest?(
+    request: SkyRequest,
+    context: SkyContext,
+  ): SkyResponse | void | Promise<SkyResponse | void>;
   onResponse?(
     request: SkyRequest,
     response: SkyResponse,

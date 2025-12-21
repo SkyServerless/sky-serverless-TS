@@ -192,10 +192,7 @@ function registerDemoRoutes(app: App): void {
   app.get(
     "/auth/me",
     (request, ctx) => {
-      const user = ctx.services.user as DemoAuthUser | undefined;
-      if (!user) {
-        return httpError({ statusCode: 401, message: "Unauthorized" });
-      }
+      const user = ctx.services.user as DemoAuthUser;
       const authHeader = request.headers["authorization"];
       const authorization =
         typeof authHeader === "string"
@@ -208,6 +205,7 @@ function registerDemoRoutes(app: App): void {
     {
       summary: "Return the authenticated user",
       tags: ["auth"],
+      auth: { required: true },
       parameters: [
         {
           name: "Authorization",
@@ -227,10 +225,7 @@ function registerDemoRoutes(app: App): void {
   app.get(
     "/notes",
     (request, ctx) => {
-      const user = ctx.services.user as DemoAuthUser | undefined;
-      if (!user) {
-        return httpError({ statusCode: 401, message: "Unauthorized" });
-      }
+      const user = ctx.services.user as DemoAuthUser;
       const clientVersionHeader = request.headers["x-client-version"];
       const clientVersion = Array.isArray(clientVersionHeader)
         ? clientVersionHeader[0]
@@ -246,6 +241,7 @@ function registerDemoRoutes(app: App): void {
     {
       summary: "Protected notes endpoint",
       tags: ["auth"],
+      auth: { required: true },
       parameters: [
         {
           name: "Authorization",
