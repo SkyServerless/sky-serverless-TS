@@ -402,6 +402,18 @@ export const myAdapter: ProviderAdapter<MyReq, MyRes> = {
 - generates a deploy artifact with `package.json` + `manifest.json`
 - for GCP, writes a Dockerfile and deploys with `gcloud`
 
+Deploy options (GCP):
+
+- `--name <name>` function name (defaults to `package.json` name)
+- `--project <id>` GCP project ID (or env var `GCP_PROJECT`)
+- `--region <region>` GCP region (or env var `GCP_REGION`)
+- `--minInstances <n>` minimum number of instances
+- `--maxInstances <n>` maximum number of instances
+- `--concurrency <n>` max concurrent requests per instance
+- `--timeout <duration>` request timeout (ex: `300s`, `5m`, `1h`)
+- `--cpu <n>` CPU allocation (ex: `1`, `2`)
+- `--memory <size>` memory allocation (ex: `512Mi`, `1Gi`)
+
 ### Remove
 
 `sky remove --provider=gcp` deletes the Cloud Run service created by deploy.

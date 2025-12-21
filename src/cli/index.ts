@@ -12,12 +12,12 @@ export const ROOT_DEP_VERSIONS = extractDependencyVersions();
 
 async function run(): Promise<void> {
   const args = process.argv.slice(2);
-  if (!args.length || args.includes("--help") || args.includes("-h")) {
+  if (!args.length || args[0] === "--help" || args[0] === "-h") {
     printGlobalHelp();
     return;
   }
 
-  if (args.includes("--version") || args.includes("-v")) {
+  if (args[0] === "--version" || args[0] === "-v") {
     console.log(CLI_VERSION);
     return;
   }
