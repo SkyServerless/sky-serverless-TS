@@ -1,6 +1,6 @@
 {
   "name": "sky-serverless",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -27,6 +27,9 @@
     "./plugins/data/*": {
       "types": "./dist/plugins/data/*.d.ts",
       "default": "./dist/plugins/data/*.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
     }
   },
   "typesVersions": {
