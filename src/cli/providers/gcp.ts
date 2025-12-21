@@ -6,6 +6,12 @@ export interface GcpDeployOptions {
   region?: string;
   source?: string;
   name: string;
+  minInstances?: number;
+  maxInstances?: number;
+  concurrency?: number;
+  timeout?: `${number}s` | `${number}m` | `${number}h`;
+  cpu?: number;
+  memory?: `${number}Mi`| `${number}Gi`;
 }
 
 export interface GcpRemoveOptions {
@@ -16,6 +22,18 @@ export interface GcpRemoveOptions {
 
 export async function deployToGcp(options: GcpDeployOptions): Promise<void> {
   logInfo("Deploying to Google Cloud Run...");
+  const min = options.minInstances ?? 0;
+  const max = options.maxInstances;
+
+  if (min < 0) throw new Error("minInstances deve ser >= 0");
+  if (max !== undefined && max <= 0) throw new Error("maxInstances deve ser > 0");
+  if (max !== undefined && min > max) throw new Error("minInstances não pode ser maior que maxInstances");
+
+  const conc = options.concurrency ?? 80;
+  if (conc < 1 || conc > 1000) throw new Error("concurrency deve estar entre 1 e 1000");
+
+  const cpu = options.cpu ?? 1;
+  if (cpu <= 0) throw new Error("cpu deve ser > 0");
 
   const args = [
     "run",
@@ -24,7 +42,16 @@ export async function deployToGcp(options: GcpDeployOptions): Promise<void> {
     `--source=${options.source || "."}`,
     `--port=8080`,
     "--allow-unauthenticated",
+    `--min-instances=${options.minInstances ?? 0}`,
+    `--concurrency=${options.concurrency ?? 80}`,
+    `--timeout=${options.timeout ?? "300s"}`,
+    `--cpu=${options.cpu ?? 1}`,
+    `--memory=${options.memory ?? "512Mi"}`
   ];
+
+  if (options.maxInstances !== undefined) {
+    args.push(`--max-instances=${options.maxInstances}`);
+  }
 
   if (options.project) {
     args.push(`--project=${options.project}`);
