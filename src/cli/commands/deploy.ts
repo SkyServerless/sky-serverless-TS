@@ -23,10 +23,11 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
   }
 
   // 1. Find and pack the sky-serverless framework
-  const frameworkPkgJsonPath = require.resolve("sky-serverless/package.json", {
+  const frameworkMainPath = require.resolve("sky-serverless", {
     paths: [process.cwd(), __dirname],
   });
-  const frameworkRoot = path.dirname(frameworkPkgJsonPath);
+  const frameworkRoot = path.dirname(path.dirname(frameworkMainPath));
+  const frameworkPkgJsonPath = path.join(frameworkRoot, "package.json");
   const frameworkPkgJson = JSON.parse(
     await fsp.readFile(frameworkPkgJsonPath, "utf-8"),
   );
@@ -57,7 +58,7 @@ export async function handleDeployCommand(argv: string[]): Promise<void> {
 
     // 3. Copy build artifacts
     logInfo(`Copying build output from ${result.outDir} to ${artifactDir}...`);
-    await fsp.cp(result.outDir, artifactDir, { recursive: true });
+    await fsp.cp(path.join(result.outDir, "."), artifactDir, { recursive: true });
     await fsp.copyFile(tgzSourcePath, path.join(artifactDir, tgzName));
 
     const entrypointRelative = path.relative(result.outDir, result.entrypointJs);
