@@ -345,6 +345,28 @@ describe("mssqlPlugin", () => {
     });
   });
 
+  it("treats nulls and plain objects as raw parameters", async () => {
+    const fakePool = createFakeMssqlPool([{ ok: true }]);
+    const plugin = mssqlPlugin({
+      config: { server: "localhost", user: "sa" },
+      poolFactory: () => fakePool.pool,
+    });
+
+    const context = createContext();
+    await plugin.onRequest?.(createRequest(), context);
+    const client = context.services.mssql as MssqlClient;
+
+    await client.query("SELECT @raw as raw", {
+      raw: { foo: "bar" },
+      empty: null,
+    });
+
+    expect(fakePool.requests[0].inputs).toEqual([
+      { name: "raw", value: { foo: "bar" } },
+      { name: "empty", value: null },
+    ]);
+  });
+
   it("reads config from env fallback and caches the pool", async () => {
     process.env.SKY_MSSQL_CONN_STR =
       "mssql://user:pass@sqlhost:1433/core?encrypt=true&trustServerCertificate=false";
@@ -558,6 +580,82 @@ describe("mssqlPlugin", () => {
     const noDatabase =
       __mssqlInternals.parseMssqlConnectionString("mssql://sqlhost");
     expect(noDatabase.database).toBeUndefined();
+  });
+
+  it("parses ODBC connection strings with aliases and options", () => {
+    const config = __mssqlInternals.parseMssqlConnectionString(
+      [
+        "Server=localhost,1433",
+        "Server=localhost,invalid",
+        "Database=Sky",
+        "Initial Catalog=core",
+        "User Id=sa",
+        "Uid=app",
+        "User=override",
+        "Username=final",
+        "Password=pass",
+        "Pwd=secret",
+        "Encrypt=maybe",
+        "Encrypt=yes",
+        "TrustServerCertificate=maybe",
+        "TrustServerCertificate=no",
+        "Port=bad",
+        "Port=1666",
+        "Addr=(local)",
+        "Address=,1234",
+        "Network Address=np:.,1555",
+        "NoEqualsPart",
+        "Server=",
+        "Application Name=sky",
+      ].join(";"),
+    );
+
+    expect(config).toMatchObject({
+      server: "localhost",
+      port: 1555,
+      database: "core",
+      user: "final",
+      password: "secret",
+      options: {
+        encrypt: true,
+        trustServerCertificate: false,
+      },
+    });
+  });
+
+  it("accepts ODBC data source strings with tcp prefixes", () => {
+    const config = __mssqlInternals.parseMssqlConnectionString(
+      [
+        "Data Source=tcp:dbhost\\inst,1444",
+        "Data Source=(localdb)",
+        "Database=inventory",
+        "User=sa",
+        "Password=pass",
+        "Encrypt=1",
+        "TrustServerCertificate=0",
+      ].join(";"),
+    );
+
+    expect(config).toMatchObject({
+      server: "localhost",
+      port: 1444,
+      database: "inventory",
+      user: "sa",
+      password: "pass",
+      options: {
+        encrypt: true,
+        trustServerCertificate: false,
+      },
+    });
+  });
+
+  it("returns empty config for blank or invalid MSSQL strings", () => {
+    expect(__mssqlInternals.parseMssqlConnectionString("   ")).toEqual({});
+    expect(
+      __mssqlInternals.parseMssqlConnectionString(
+        "mssql://user:pw@host:abc/db",
+      ),
+    ).toEqual({});
   });
 
   it("caches the MSSQL module loader result across calls", async () => {
