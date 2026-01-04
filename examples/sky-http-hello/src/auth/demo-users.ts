@@ -1,17 +1,16 @@
-import { SkyPlugin } from "../../src/core/plugin";
-import { authPlugin, AuthUser } from "../../src/plugins";
+import { AuthUser } from "../../../../src";
 
-export interface DemoAuthUser extends AuthUser {
+export interface DemoUser extends AuthUser {
   email: string;
   name: string;
   role: "admin" | "reader";
 }
 
-interface DemoAccount extends DemoAuthUser {
+interface DemoAccount extends DemoUser {
   password: string;
 }
 
-export interface DemoLoginRequest {
+export interface LoginRequest {
   email: string;
   password: string;
 }
@@ -33,21 +32,7 @@ const demoAccounts: DemoAccount[] = [
   },
 ];
 
-export function createDemoAuthPlugin(): SkyPlugin {
-  return authPlugin({
-    config: {
-      jwtSecret: process.env.SKY_AUTH_JWT_SECRET ?? "demo-secret",
-      accessTokenTtlSeconds: 15 * 60,
-      refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
-      cookieName: "demo.auth",
-    },
-    async resolveUser(payload) {
-      return findDemoUserById(payload.sub);
-    },
-  });
-}
-
-export function parseDemoLoginRequest(body: unknown): DemoLoginRequest | null {
+export function parseLoginRequest(body: unknown): LoginRequest | null {
   if (!body || typeof body !== "object") {
     return null;
   }
@@ -61,25 +46,25 @@ export function parseDemoLoginRequest(body: unknown): DemoLoginRequest | null {
 }
 
 export function authenticateDemoUser(
-  credentials: DemoLoginRequest,
-): DemoAuthUser | undefined {
+  credentials: LoginRequest,
+): DemoUser | null {
   const account = demoAccounts.find(
     (demoUser) =>
       demoUser.email === credentials.email &&
       demoUser.password === credentials.password,
   );
-  return account ? toDemoAuthUser(account) : undefined;
+  return account ? toDemoUser(account) : null;
 }
 
-function findDemoUserById(id: string | undefined): DemoAuthUser | null {
+export function findDemoUserById(id: string | undefined): DemoUser | null {
   if (!id) {
     return null;
   }
   const account = demoAccounts.find((user) => user.id === id);
-  return account ? toDemoAuthUser(account) : null;
+  return account ? toDemoUser(account) : null;
 }
 
-function toDemoAuthUser(account: DemoAccount): DemoAuthUser {
+function toDemoUser(account: DemoAccount): DemoUser {
   const { password: _ignored, ...user } = account;
   return user;
 }

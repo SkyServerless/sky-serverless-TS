@@ -34,11 +34,21 @@
   },
   "typesVersions": {
     "*": {
-      "plugins": ["dist/plugins/index.d.ts"],
-      "plugins/auth": ["dist/plugins/auth/index.d.ts"],
-      "plugins/doc": ["dist/plugins/doc/index.d.ts"],
-      "plugins/data": ["dist/plugins/data/index.d.ts"],
-      "plugins/data/*": ["dist/plugins/data/*"]
+      "plugins": [
+        "dist/plugins/index.d.ts"
+      ],
+      "plugins/auth": [
+        "dist/plugins/auth/index.d.ts"
+      ],
+      "plugins/doc": [
+        "dist/plugins/doc/index.d.ts"
+      ],
+      "plugins/data": [
+        "dist/plugins/data/index.d.ts"
+      ],
+      "plugins/data/*": [
+        "dist/plugins/data/*"
+      ]
     }
   },
   "bin": {
@@ -62,13 +72,8 @@
     "coverage:base": "vitest run --coverage",
     "coverage:plugins": "vitest run --coverage --coverage.include \"src/plugins/data/**\" --coverage.thresholds.perFile --coverage.thresholds.lines 100 --coverage.thresholds.branches 100 --coverage.thresholds.functions 100 --coverage.thresholds.statements 100",
     "test:coverage": "npm run coverage:base && npm run coverage:plugins",
-    "example:hello": "npm run dev",
-    "example:hello:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/sky-http-hello/server.js",
-    "example:openshift": "ts-node --project tsconfig.json examples/openshift/server.ts",
-    "example:openshift:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/openshift/server.js",
-    "example:gcp": "ts-node --project tsconfig.json examples/gcp/server.ts",
-    "example:gcp:build": "tsc -p tsconfig.examples.json && node examples/dist/examples/gcp/server.js",
-    "bench:core": "ts-node --project tsconfig.json scripts/benchmark.ts"
+    "bench:core": "ts-node --project tsconfig.json scripts/benchmark.ts",
+    "examples": "docker compose -f docker-compose.mysql.yml -f docker-compose.mssql.yml -f docker-compose.redis.yml up -d && SKY_MYSQL_URI='mysql://sky:sky@localhost:3306/sky' SKY_MSSQL_CONN_STR='Server=localhost,1433;Database=master;User Id=sa;Password=SkyStrongPwd123!;Encrypt=true;TrustServerCertificate=true' SKY_REDIS_URI='redis://localhost:6379' npx ts-node --project tsconfig.json examples/sky-http-hello/server.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"
@@ -81,7 +86,7 @@
     "vitest": "^4.0.15"
   },
   "optionalDependencies": {
-    "ioredis": "^5.4.1",
+    "ioredis": "^5.8.2",
     "mssql": "^12.2.0",
     "mysql2": "^3.11.3"
   }

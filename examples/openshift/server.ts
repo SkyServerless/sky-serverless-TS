@@ -1,9 +1,9 @@
 import http from "node:http";
 import { createHttpHandler } from "../../src/core/provider-adapter";
 import { OpenShiftProviderAdapter } from "../../src/providers/openshift/openShiftProviderAdapter";
-import { createDemoApp } from "../shared/demo-app";
+import { createApp } from "../sky-http-hello/src/app";
 
-const app = createDemoApp();
+const app = createApp();
 
 const adapter = new OpenShiftProviderAdapter();
 const handler = createHttpHandler(adapter, app);

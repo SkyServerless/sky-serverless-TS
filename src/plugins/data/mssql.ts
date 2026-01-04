@@ -184,40 +184,196 @@ function resolveMssqlConfig(
 
 /* c8 ignore start */
 function parseMssqlConnectionString(uri: string): MssqlConnectionConfig {
-  const normalized = uri.includes("://") ? uri : `mssql://${uri}`;
-  const url = new URL(normalized);
+  const trimmed = uri.trim();
+  if (!trimmed) {
+    return {};
+  }
+
+  if (looksLikeOdbcConnectionString(trimmed)) {
+    return parseOdbcConnectionString(trimmed);
+  }
+
+  const normalized = trimmed.includes("://") ? trimmed : `mssql://${trimmed}`;
   const config: MssqlConnectionConfig = {};
 
-  if (url.hostname) {
-    config.server = url.hostname;
-  }
-  if (url.port) {
-    config.port = Number(url.port);
-  }
-  if (url.username) {
-    config.user = decodeURIComponent(url.username);
-  }
-  if (url.password) {
-    config.password = decodeURIComponent(url.password);
-  }
-  const database = url.pathname.replace(/^\//, "");
-  if (database) {
-    config.database = decodeURIComponent(database);
-  }
+  try {
+    const url = new URL(normalized);
 
-  const encrypt = url.searchParams.get("encrypt");
-  if (encrypt) {
-    config.options ??= {};
-    config.options.encrypt = encrypt === "true";
-  }
+    if (url.hostname) {
+      config.server = url.hostname;
+    }
+    if (url.port) {
+      config.port = Number(url.port);
+    }
+    if (url.username) {
+      config.user = decodeURIComponent(url.username);
+    }
+    if (url.password) {
+      config.password = decodeURIComponent(url.password);
+    }
+    const database = url.pathname.replace(/^\//, "");
+    if (database) {
+      config.database = decodeURIComponent(database);
+    }
 
-  const trust = url.searchParams.get("trustServerCertificate");
-  if (trust) {
-    config.options ??= {};
-    config.options.trustServerCertificate = trust === "true";
+    const encrypt = url.searchParams.get("encrypt");
+    if (encrypt) {
+      config.options ??= {};
+      config.options.encrypt = encrypt === "true";
+    }
+
+    const trust = url.searchParams.get("trustServerCertificate");
+    if (trust) {
+      config.options ??= {};
+      config.options.trustServerCertificate = trust === "true";
+    }
+  } catch {
+    return {};
   }
 
   return config;
+}
+
+function looksLikeOdbcConnectionString(value: string): boolean {
+  const lower = value.toLowerCase();
+  return lower.includes("server=") || lower.includes("data source=");
+}
+
+function parseOdbcConnectionString(
+  value: string,
+): MssqlConnectionConfig {
+  const config: MssqlConnectionConfig = {};
+  const parts = value
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const part of parts) {
+    const index = part.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+
+    const key = part.slice(0, index).trim().toLowerCase();
+    const rawValue = part.slice(index + 1).trim();
+    if (!rawValue) {
+      continue;
+    }
+
+    switch (key) {
+      case "server":
+      case "data source":
+      case "addr":
+      case "address":
+      case "network address": {
+        const { server, port } = parseServerValue(rawValue);
+        if (server) {
+          config.server = server;
+        }
+        if (port !== undefined) {
+          config.port = port;
+        }
+        break;
+      }
+      case "database":
+      case "initial catalog":
+        config.database = rawValue;
+        break;
+      case "user id":
+      case "uid":
+      case "user":
+      case "username":
+        config.user = rawValue;
+        break;
+      case "password":
+      case "pwd":
+        config.password = rawValue;
+        break;
+      case "port": {
+        const parsed = Number(rawValue);
+        if (Number.isFinite(parsed)) {
+          config.port = parsed;
+        }
+        break;
+      }
+      case "encrypt": {
+        const parsed = parseBoolean(rawValue);
+        if (parsed !== undefined) {
+          config.options ??= {};
+          config.options.encrypt = parsed;
+        }
+        break;
+      }
+      case "trustservercertificate": {
+        const parsed = parseBoolean(rawValue);
+        if (parsed !== undefined) {
+          config.options ??= {};
+          config.options.trustServerCertificate = parsed;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return config;
+}
+
+function parseServerValue(
+  rawValue: string,
+): { server?: string; port?: number } {
+  let value = rawValue.trim();
+  const lower = value.toLowerCase();
+  if (lower.startsWith("tcp:")) {
+    value = value.slice(4);
+  } else if (lower.startsWith("np:")) {
+    value = value.slice(3);
+  }
+
+  let serverPart = value;
+  let portPart: string | undefined;
+
+  const commaIndex = value.indexOf(",");
+  if (commaIndex >= 0) {
+    serverPart = value.slice(0, commaIndex);
+    portPart = value.slice(commaIndex + 1);
+  }
+
+  const instanceSplit = serverPart.split("\\");
+  let server = instanceSplit[0]?.trim();
+  if (!server) {
+    return {};
+  }
+  const normalized = server.toLowerCase();
+  if (
+    normalized === "." ||
+    normalized === "(local)" ||
+    normalized === "(localdb)"
+  ) {
+    server = "localhost";
+  }
+
+  let port: number | undefined;
+  if (portPart) {
+    const parsed = Number(portPart.trim());
+    if (Number.isFinite(parsed)) {
+      port = parsed;
+    }
+  }
+
+  return { server, port };
+}
+
+function parseBoolean(value: string): boolean | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
 }
 /* c8 ignore stop */
 

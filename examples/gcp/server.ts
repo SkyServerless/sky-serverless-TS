@@ -5,9 +5,9 @@ import {
   GcpRequest,
   GcpResponse,
 } from "../../src/providers/gcp/gcpFunctionsProviderAdapter";
-import { createDemoApp } from "../shared/demo-app";
+import { createApp } from "../sky-http-hello/src/app";
 
-const app = createDemoApp();
+const app = createApp();
 
 const adapter = new GcpFunctionsProviderAdapter();
 const handler = createHttpHandler(adapter, app);
